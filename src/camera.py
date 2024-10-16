@@ -26,23 +26,23 @@ class Camera:
         self.aspect_ratio: float = aspect_ratio
         self.image_width: int = image_width
         self.image_height: int = max(1, int(image_width / aspect_ratio))
+        h, w = self.image_height, self.image_width
 
         self.viewport_height: float = viewport_height
-        self.viewport_width: float = viewport_height * (image_width / self.image_height)
-        h, w = self.image_height, self.image_width
+        self.viewport_width: float = viewport_height * (w / h)
 
         # x-axis
         left_border: float = -self.viewport_width / 2
-        self.width_pixel_delta: float = self.viewport_width / image_width
+        self.width_pixel_delta: float = self.viewport_width / w
         pixels_x: Float[t.Tensor, "w"] = t.linspace(
-            left_border + self.width_pixel_delta / 2, -left_border - self.width_pixel_delta / 2, image_width
+            left_border + self.width_pixel_delta / 2, -left_border - self.width_pixel_delta / 2, w
         )
 
         # y-axis
         top_border: float = viewport_height / 2
-        self.height_pixel_delta: float = viewport_height / self.image_height
+        self.height_pixel_delta: float = viewport_height / h
         pixels_y: Float[t.Tensor, "h"] = t.linspace(
-            -top_border + self.height_pixel_delta / 2, top_border - self.height_pixel_delta / 2, self.image_height
+            -top_border + self.height_pixel_delta / 2, top_border - self.height_pixel_delta / 2, h
         )
 
         # z-axis
@@ -51,7 +51,7 @@ class Camera:
         # Generate coordinate grids
         grid_x, grid_y, grid_z = t.meshgrid(pixels_x, pixels_y, pixels_z, indexing="ij")
         viewport_pixels: Float[t.Tensor, "h w 3"] = t.stack([grid_x, grid_y, grid_z], dim=-1)
-        self.viewport_pixels = viewport_pixels.permute(1, 0, 2, 3).reshape(self.image_height, image_width, 3)
+        self.viewport_pixels = viewport_pixels.permute(1, 0, 2, 3).reshape(h, w, 3)
 
     @jaxtyped(typechecker=typechecker)
     def ray_color(
@@ -72,8 +72,7 @@ class Camera:
     @jaxtyped(typechecker=typechecker)
     def render(self, world: Hittable) -> Image.Image:
         sample: int = self.samples_per_pixel
-        h: int = self.image_height
-        w: int = self.image_width
+        h, w = self.image_height, self.image_width
 
         # Background color gradient
         white: Float[t.Tensor, "3"] = t.tensor([1.0, 1.0, 1.0])
@@ -103,20 +102,14 @@ class Camera:
         )
         pixel_rays = F.normalize(pixel_rays, dim=3)
 
-        # Reshape rays for processing
+
         pixel_rays_flat: Float[t.Tensor, "S 3 2"] = pixel_rays.view(-1, 3, 2)
-
-        # Call world.hit with the reshaped rays
         hit_record: HitRecord = world.hit(pixel_rays_flat, 0.0, float("inf"))
-
-        # Compute colors per sample
         colors: Float[t.Tensor, "sample h w 3"] = self.ray_color(background_colors, hit_record)
 
         # Average over samples
         img: Float[t.Tensor, "h w 3"] = colors.mean(dim=0)
 
-        # Convert to uint8
         array: np.ndarray = img.cpu().numpy().astype(np.uint8)
         array = array[::-1, :, :]  # Flip vertically
-
         return Image.fromarray(array, mode="RGB")

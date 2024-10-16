@@ -5,6 +5,7 @@ from typeguard import typechecked as typechecker
 
 from hittable import HitRecord, Hittable
 
+
 @jaxtyped(typechecker=typechecker)
 class Sphere(Hittable):
     def __init__(self, center: Float[t.Tensor, "3"], radius: float):
@@ -25,17 +26,19 @@ class Sphere(Hittable):
 
         oc: Float[t.Tensor, "N 3"] = origin - self.center  # Broadcasted to [N, 3]
 
-        a: Float[t.Tensor, "N"] = (pixel_directions ** 2).sum(dim=1)
+        # Solve quadratic equation
+        a: Float[t.Tensor, "N"] = (pixel_directions**2).sum(dim=1)
         b: Float[t.Tensor, "N"] = 2.0 * (pixel_directions * oc).sum(dim=1)
-        c: Float[t.Tensor, "N"] = (oc ** 2).sum(dim=1) - self.radius ** 2
+        c: Float[t.Tensor, "N"] = (oc**2).sum(dim=1) - self.radius**2
 
-        discriminant: Float[t.Tensor, "N"] = b ** 2 - 4 * a * c
+        discriminant: Float[t.Tensor, "N"] = b**2 - 4 * a * c
         sphere_hit: Bool[t.Tensor, "N"] = discriminant >= 0
 
-        t_hit: Float[t.Tensor, "N"] = t.full_like(discriminant, float('inf'))
+        t_hit: Float[t.Tensor, "N"] = t.full_like(discriminant, float("inf"))
         sqrt_discriminant: Float[t.Tensor, "N"] = t.zeros_like(discriminant)
         sqrt_discriminant[sphere_hit] = t.sqrt(discriminant[sphere_hit])
 
+        # Compute roots
         t0: Float[t.Tensor, "N"] = t.zeros_like(discriminant)
         t1: Float[t.Tensor, "N"] = t.zeros_like(discriminant)
         denom: Float[t.Tensor, "N"] = 2.0 * a
@@ -48,7 +51,7 @@ class Sphere(Hittable):
         t_hit = t.where((t0_valid) & (t0 < t_hit), t0, t_hit)
         t_hit = t.where((t1_valid) & (t1 < t_hit), t1, t_hit)
 
-        sphere_hit = sphere_hit & (t_hit < float('inf'))
+        sphere_hit = sphere_hit & (t_hit < float("inf"))
 
         # Compute hit points and normals where sphere_hit is True
         hit_points: Float[t.Tensor, "N 3"] = origin + pixel_directions * t_hit.unsqueeze(-1)

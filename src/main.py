@@ -1,5 +1,6 @@
 import torch as t
 from jaxtyping import Float
+
 from camera import Camera
 from hittable import HitRecord, Hittable, HittableList  # noqa: F401
 from sphere import Sphere

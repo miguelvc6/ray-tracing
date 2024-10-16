@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List
 
-
 import torch as t
 from jaxtyping import Bool, Float, jaxtyped
 from typeguard import typechecked as typechecker
@@ -64,6 +63,8 @@ class Hittable(ABC):
 
 @jaxtyped(typechecker=typechecker)
 class HittableList(Hittable):
+    """List of hittable objects."""
+
     def __init__(self, objects: List[Hittable]):
         self.objects: List[Hittable] = objects
 
