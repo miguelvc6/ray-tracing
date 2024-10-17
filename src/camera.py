@@ -1,4 +1,3 @@
-import numpy as np
 import torch as t
 import torch.nn.functional as F
 from jaxtyping import Bool, Float, jaxtyped
@@ -57,32 +56,76 @@ class Camera:
     @jaxtyped(typechecker=typechecker)
     def ray_color(
         self,
-        background_colors: Float[t.Tensor, "sample h w 3"],
-        hit_record: HitRecord,
+        pixel_rays: Float[t.Tensor, "sample h w 3 2"],
+        world: Hittable,
+        depth: int = 50,
     ) -> Float[t.Tensor, "sample h w 3"]:
+        if depth <= 0:
+            # Return black when maximum depth is reached
+            N = pixel_rays.shape[0] * pixel_rays.shape[1] * pixel_rays.shape[2]
+            return t.zeros((N, 3), dtype=pixel_rays.dtype, device=pixel_rays.device).view(pixel_rays.shape[:-2] + (3,))
 
-        sample, h, w = background_colors.shape[:3]
-        hit_mask: Bool[t.Tensor, "sample h w 1"] = hit_record.hit.view(sample, h, w).unsqueeze(-1)
-        hit_normals: Float[t.Tensor, "sample h w 3"] = ((hit_record.normal.view(sample, h, w, 3) + 1) * 0.5 * 255).to(
-            dtype=background_colors.dtype
-        )
+        # Flatten pixel_rays
+        original_shape = pixel_rays.shape[:-2]
+        N = pixel_rays.numel() // (3 * 2)
+        pixel_rays_flat: Float[t.Tensor, "N 3 2"] = pixel_rays.view(N, 3, 2)
 
-        colors: Float[t.Tensor, "sample h w 3"] = t.where(hit_mask, hit_normals, background_colors)
+        # Perform hit test
+        hit_record: HitRecord = world.hit(pixel_rays_flat, 0.001, float("inf"))
+
+        # Initialize colors
+        colors: Float[t.Tensor, "N 3"] = t.zeros((N, 3), dtype=pixel_rays.dtype, device=pixel_rays.device)
+
+        # Handle rays that did not hit anything
+        no_hit_mask: Bool[t.Tensor, "N"] = ~hit_record.hit
+        if no_hit_mask.any():
+            # Compute background color based on ray direction
+            ray_dirs: Float[t.Tensor, "N 3"] = F.normalize(pixel_rays_flat[:, :, 1], dim=-1)
+            t_param = 0.5 * (ray_dirs[:, 1] + 1.0)
+            background_colors_flat = (1.0 - t_param).unsqueeze(-1) * t.tensor([1.0, 1.0, 1.0])
+            background_colors_flat += t_param.unsqueeze(-1) * t.tensor([0.5, 0.7, 1.0])
+            colors[no_hit_mask] = background_colors_flat[no_hit_mask] * 255
+
+        # Handle rays that hit an object
+        hit_mask: Bool[t.Tensor, "N"] = hit_record.hit
+        M = hit_mask.sum()  # Number of hits
+        if hit_mask.any():
+            normals: Float[t.Tensor, "M 3"] = hit_record.normal[hit_mask]
+            points: Float[t.Tensor, "M 3"] = hit_record.point[hit_mask]
+
+            # Generate scatter direction for diffuse reflection
+            scatter_direction: Float[t.Tensor, "M 3"] = normals + random_unit_vector(normals.shape)
+
+            # Handle degenerate scatter direction
+            zero_mask: Bool[t.Tensor, "M"] = scatter_direction.norm(dim=1) < 1e-8
+            scatter_direction[zero_mask] = normals[zero_mask]
+
+            # Normalize scatter direction
+            scatter_direction = F.normalize(scatter_direction, dim=-1)
+
+            # Create new rays for recursion
+            new_origin: Float[t.Tensor, "M 3"] = points
+            new_direction: Float[t.Tensor, "M 3"] = scatter_direction
+            new_rays: Float[t.Tensor, "M 3 2"] = t.stack([new_origin, new_direction], dim=-1)
+
+            # Recursive call
+            new_colors: Float[t.Tensor, "M 3"] = self.ray_color(
+                new_rays.view(-1, 1, 1, 3, 2),
+                world,
+                depth - 1,
+            ).view(-1, 3)
+
+            # Attenuate color for diffuse reflection
+            colors[hit_mask] = 0.5 * new_colors
+
+        # Reshape colors back to [sample, h, w, 3]
+        colors = colors.view(*original_shape, 3)
         return colors
 
     @jaxtyped(typechecker=typechecker)
     def render(self, world: Hittable) -> Image.Image:
         sample: int = self.samples_per_pixel
         h, w = self.image_height, self.image_width
-
-        # Background color gradient
-        white: Float[t.Tensor, "3"] = t.tensor([1.0, 1.0, 1.0])
-        light_blue: Float[t.Tensor, "3"] = t.tensor([0.5, 0.7, 1.0])
-        a: Float[t.Tensor, "h 1"] = t.linspace(0, 1, h).unsqueeze(1)
-        background_colors_single: Float[t.Tensor, "h 3"] = a * light_blue + (1.0 - a) * white
-        background_colors: Float[t.Tensor, "sample h w 3"] = (
-            background_colors_single.unsqueeze(0).unsqueeze(2).expand(sample, h, w, 3) * 255
-        )
 
         # Antialiasing: Generate multiple samples per pixel
         noise: Float[t.Tensor, "sample h w 2"] = t.rand((sample, h, w, 2)) - 0.5
@@ -96,17 +139,21 @@ class Camera:
         )
         sampled_pixels: Float[t.Tensor, "sample h w 3"] = t.cat([sampled_pixels_xy, sampled_pixels_z], dim=-1)
 
-        # Compute rays
-        origin: Float[t.Tensor, "1 1 1 3"] = self.origin.view(1, 1, 1, 3)
-        pixel_rays: Float[t.Tensor, "sample h w 3 2"] = t.stack(
-            [origin.expand(sample, h, w, 3), sampled_pixels - self.origin], dim=-1
-        )
-        pixel_rays = F.normalize(pixel_rays, dim=3)
+        # Compute direction vectors
+        directions: Float[t.Tensor, "sample h w 3"] = F.normalize(sampled_pixels - self.origin, dim=-1)
 
-        pixel_rays_flat: Float[t.Tensor, "S 3 2"] = pixel_rays.view(-1, 3, 2)
-        hit_record: HitRecord = world.hit(pixel_rays_flat, 0.0, float("inf"))
-        colors: Float[t.Tensor, "sample h w 3"] = self.ray_color(background_colors, hit_record)
+        # Normalize direction vectors
+        directions = F.normalize(directions, dim=-1)
 
-        # Average over samples
+        # Build rays
+        origin: Float[t.Tensor, "sample h w 3"] = self.origin.view(1, 1, 1, 3).expand(sample, h, w, 3)
+        pixel_rays: Float[t.Tensor, "sample h w 3 2"] = t.stack([origin, directions], dim=-1)
+
+        # Call ray_color
+        colors: Float[t.Tensor, "sample h w 3"] = self.ray_color(pixel_rays, world, depth=50)
+
+        # Average over antialiasing samples
         img: Float[t.Tensor, "h w 3"] = colors.mean(dim=0)
+
+        # Convert to image
         return tensor_to_image(img)
