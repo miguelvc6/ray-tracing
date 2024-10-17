@@ -6,6 +6,7 @@ from PIL import Image
 from typeguard import typechecked as typechecker
 
 from hittable import HitRecord, Hittable
+from utils import tensor_to_image, random_unit_vector
 
 
 @jaxtyped(typechecker=typechecker)
@@ -102,14 +103,10 @@ class Camera:
         )
         pixel_rays = F.normalize(pixel_rays, dim=3)
 
-
         pixel_rays_flat: Float[t.Tensor, "S 3 2"] = pixel_rays.view(-1, 3, 2)
         hit_record: HitRecord = world.hit(pixel_rays_flat, 0.0, float("inf"))
         colors: Float[t.Tensor, "sample h w 3"] = self.ray_color(background_colors, hit_record)
 
         # Average over samples
         img: Float[t.Tensor, "h w 3"] = colors.mean(dim=0)
-
-        array: np.ndarray = img.cpu().numpy().astype(np.uint8)
-        array = array[::-1, :, :]  # Flip vertically
-        return Image.fromarray(array, mode="RGB")
+        return tensor_to_image(img)
