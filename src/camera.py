@@ -80,7 +80,7 @@ class Camera:
             background_colors_flat = (1.0 - t_param).unsqueeze(-1) * t.tensor([1.0, 1.0, 1.0])
             background_colors_flat += t_param.unsqueeze(-1) * t.tensor([0.5, 0.7, 1.0])
             colors[no_hit_mask] = background_colors_flat[no_hit_mask]
-
+            
         # Handle rays that hit an object
         hit_mask: Bool[t.Tensor, "N"] = hit_record.hit
         if hit_mask.any():
@@ -108,12 +108,18 @@ class Camera:
 
                 scatter_mask, attenuation, scattered_rays = material.scatter(ray_in, sub_hit_record)
 
-                if scatter_mask.any():
-                    scatter_indices = scatter_mask.nonzero(as_tuple=False).squeeze(-1)
+                # Separate indices for rays that scatter and rays that do not
+                scatter_indices = scatter_mask.nonzero(as_tuple=False).squeeze(-1)
+                no_scatter_indices = (~scatter_mask).nonzero(as_tuple=False).squeeze(-1)
+
+                # Handle scattered rays
+                if scatter_indices.numel() > 0:
                     recursive_colors = self.ray_color(scattered_rays[scatter_indices], world, depth - 1)
                     colors[indices[scatter_indices]] = attenuation[scatter_indices] * recursive_colors
-                else:
-                    colors[indices] = t.zeros((len(indices), 3), device=pixel_rays.device)
+
+                # Handle rays that do not scatter
+                if no_scatter_indices.numel() > 0:
+                    colors[indices[no_scatter_indices]] = t.zeros((no_scatter_indices.numel(), 3), device=pixel_rays.device)
 
         return colors
 

@@ -75,8 +75,9 @@ class Lambertian(Material):
 
 @jaxtyped(typechecker=typechecker)
 class Metal(Material):
-    def __init__(self, albedo: Float[t.Tensor, "3"]):
+    def __init__(self, albedo: Float[t.Tensor, "3"], fuzz: float = 0.3):
         self.albedo = albedo
+        self.fuzz = max(0.0, min(fuzz, 1.0))
 
     @jaxtyped(typechecker=typechecker)
     def scatter(
@@ -90,7 +91,7 @@ class Metal(Material):
     ]:
         N = r_in.shape[0]
         normals = hit_record.normal  # Shape: [N, 3]
-        points = hit_record.point    # Shape: [N, 3]
+        points = hit_record.point  # Shape: [N, 3]
 
         # Incoming ray directions
         in_directions = r_in[:, :, 1]  # Shape: [N, 3]
@@ -99,6 +100,9 @@ class Metal(Material):
         # Generate reflected directions
         reflected_direction = in_directions - 2 * t.sum(in_directions * normals, dim=1, keepdim=True) * normals
         reflected_direction = F.normalize(reflected_direction, dim=-1)  # Shape: [N, 3]
+
+        reflected_direction = reflected_direction + self.fuzz * random_unit_vector((N, 3))
+        reflected_direction = F.normalize(reflected_direction, dim=-1)
 
         # Check if reflected ray is above the surface
         dot_product = t.sum(reflected_direction * normals, dim=1)  # Shape: [N]
