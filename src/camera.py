@@ -1,3 +1,5 @@
+import math
+
 import torch as t
 import torch.nn.functional as F
 from jaxtyping import Bool, Float, jaxtyped
@@ -5,53 +7,58 @@ from PIL import Image
 from typeguard import typechecked as typechecker
 
 from hittable import HitRecord, Hittable
-from utils import tensor_to_image
+from utils import degrees_to_radians, tensor_to_image
 
 
 @jaxtyped(typechecker=typechecker)
 class Camera:
     def __init__(
         self,
-        origin: Float[t.Tensor, "3"] = t.Tensor([0.0, 0.0, 0.0]),
-        focal_length: float = 1.0,
+        look_from: Float[t.Tensor, "3"] = t.tensor([0.0, 0.0, 0.0]),
+        look_at: Float[t.Tensor, "3"] = t.tensor([0.0, 0.0, -1.0]),
+        vup: Float[t.Tensor, "3"] = t.tensor([0.0, 1.0, 0.0]),
         aspect_ratio: float = 16.0 / 9.0,
         image_width: int = 400,
-        viewport_height: float = 2.0,
         samples_per_pixel: int = 10,
+        max_depth: int = 50,
+        vfov: float = 90.0,  # vertical field of view angle
     ):
-        self.origin: Float[t.Tensor, "3"] = origin
-        self.focal_length: float = focal_length
+        self.look_from: Float[t.Tensor, "3"] = look_from
+        self.look_at: Float[t.Tensor, "3"] = look_at
+        self.vup: Float[t.Tensor, "3"] = vup
+
         self.samples_per_pixel: int = samples_per_pixel
+        self.max_depth: int = max_depth
 
         self.aspect_ratio: float = aspect_ratio
         self.image_width: int = image_width
         self.image_height: int = max(1, int(image_width / aspect_ratio))
         h, w = self.image_height, self.image_width
 
-        self.viewport_height: float = viewport_height
-        self.viewport_width: float = viewport_height * (w / h)
+        # Compute viewport dimensions
+        focal_length: float = (self.look_from - self.look_at).norm()
+        theta: float = degrees_to_radians(vfov)
+        h_viewport: float = math.tan(theta / 2)
+        self.viewport_height: float = 2.0 * h_viewport * focal_length
+        self.viewport_width: float = self.viewport_height * self.aspect_ratio
 
-        # x-axis
-        left_border: float = -self.viewport_width / 2
-        self.width_pixel_delta: float = self.viewport_width / w
-        pixels_x: Float[t.Tensor, "w"] = t.linspace(
-            left_border + self.width_pixel_delta / 2, -left_border - self.width_pixel_delta / 2, w
+        # Calculate camera basis vectors
+        self.w: Float[t.Tensor, "3"] = F.normalize(self.look_from - self.look_at, dim=-1)
+        self.u: Float[t.Tensor, "3"] = F.normalize(t.cross(self.vup, self.w, dim=-1), dim=-1)
+        self.v: Float[t.Tensor, "3"] = t.cross(self.w, self.u, dim=-1)
+
+        # Calculate viewport dimensions and vectors
+        viewport_u: Float[t.Tensor, "3"] = self.viewport_width * self.u
+        viewport_v: Float[t.Tensor, "3"] = self.viewport_height * self.v
+
+        # Calculate the lower-left corner of the viewport
+        self.viewport_lower_left: Float[t.Tensor, "3"] = (
+            self.look_from - viewport_u / 2 - viewport_v / 2 - self.w * focal_length
         )
 
-        # y-axis
-        top_border: float = viewport_height / 2
-        self.height_pixel_delta: float = viewport_height / h
-        pixels_y: Float[t.Tensor, "h"] = t.linspace(
-            -top_border + self.height_pixel_delta / 2, top_border - self.height_pixel_delta / 2, h
-        )
-
-        # z-axis
-        pixels_z: Float[t.Tensor, "1"] = t.Tensor([-focal_length])
-
-        # Generate coordinate grids
-        grid_x, grid_y, grid_z = t.meshgrid(pixels_x, pixels_y, pixels_z, indexing="ij")
-        viewport_pixels: Float[t.Tensor, "h w 3"] = t.stack([grid_x, grid_y, grid_z], dim=-1)
-        self.viewport_pixels = viewport_pixels.permute(1, 0, 2, 3).reshape(h, w, 3)
+        # Store pixel delta vectors
+        self.pixel_delta_u: Float[t.Tensor, "3"] = viewport_u / (w - 1)
+        self.pixel_delta_v: Float[t.Tensor, "3"] = viewport_v / (h - 1)
 
     @jaxtyped(typechecker=typechecker)
     def ray_color(
@@ -130,32 +137,36 @@ class Camera:
         sample: int = self.samples_per_pixel
         h, w = self.image_height, self.image_width
 
-        # Antialiasing: Generate multiple samples per pixel
-        noise: Float[t.Tensor, "sample h w 2"] = t.rand((sample, h, w, 2)) - 0.5
-        scale: Float[t.Tensor, "2"] = t.tensor([self.width_pixel_delta, self.height_pixel_delta])
-        noise = noise * scale.view(1, 1, 1, 2)
+        # Prepare grid indices for pixels
+        j_indices = t.arange(h, device=self.look_from.device).view(1, h, 1, 1)
+        i_indices = t.arange(w, device=self.look_from.device).view(1, 1, w, 1)
 
-        # Adjust pixel positions
-        sampled_pixels_xy: Float[t.Tensor, "sample h w 2"] = self.viewport_pixels[:, :, :2].unsqueeze(0) + noise
-        sampled_pixels_z: Float[t.Tensor, "sample h w 1"] = (
-            self.viewport_pixels[:, :, 2].unsqueeze(0).unsqueeze(-1).expand(sample, h, w, 1)
+        # Generate random offsets for antialiasing
+        noise_u: Float[t.Tensor, "sample h w 1"] = t.rand((sample, h, w, 1), device=self.look_from.device)
+        noise_v: Float[t.Tensor, "sample h w 1"] = t.rand((sample, h, w, 1), device=self.look_from.device)
+
+        # Compute pixel positions on the viewport
+        sampled_pixels: Float[t.Tensor, "sample h w 3"] = (
+            self.viewport_lower_left.view(1, 1, 1, 3)
+            + (i_indices + noise_u) * self.pixel_delta_u.view(1, 1, 1, 3)
+            + (j_indices + noise_v) * self.pixel_delta_v.view(1, 1, 1, 3)
         )
-        sampled_pixels: Float[t.Tensor, "sample h w 3"] = t.cat([sampled_pixels_xy, sampled_pixels_z], dim=-1)
 
         # Compute direction vectors
-        directions: Float[t.Tensor, "sample h w 3"] = F.normalize(sampled_pixels - self.origin, dim=-1)
-
-        # Normalize direction vectors
-        directions = F.normalize(directions, dim=-1)
+        directions: Float[t.Tensor, "sample h w 3"] = F.normalize(
+            sampled_pixels - self.look_from.view(1, 1, 1, 3), dim=-1
+        )
 
         # Build rays
-        origin: Float[t.Tensor, "sample h w 3"] = self.origin.view(1, 1, 1, 3).expand(sample, h, w, 3)
+        origin: Float[t.Tensor, "sample h w 3"] = self.look_from.view(1, 1, 1, 3).expand(sample, h, w, 3)
         pixel_rays: Float[t.Tensor, "sample h w 3 2"] = t.stack([origin, directions], dim=-1)
 
-        # Call ray_color
-        N = pixel_rays.numel() // (3 * 2)
+        # Flatten rays for processing
+        N = sample * h * w
         pixel_rays_flat: Float[t.Tensor, "N 3 2"] = pixel_rays.view(N, 3, 2)
-        colors_flat: Float[t.Tensor, "N 3"] = self.ray_color(pixel_rays_flat, world, depth=50)
+
+        # Call ray_color
+        colors_flat: Float[t.Tensor, "N 3"] = self.ray_color(pixel_rays_flat, world, depth=self.max_depth)
         colors: Float[t.Tensor, "sample h w 3"] = colors_flat.view(sample, h, w, 3)
 
         # Average over antialiasing samples

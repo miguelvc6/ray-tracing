@@ -11,7 +11,7 @@ material_center = Lambertian(t.Tensor([0.1, 0.2, 0.5]))
 material_left = Dielectric(1.50)
 material_bubble = Dielectric(1.00 / 1.50)
 material_right = Metal(t.Tensor([0.8, 0.6, 0.2]), fuzz=1.0)
-
+ 
 world: HittableList = HittableList(
     [
         Sphere(t.tensor([0.0, -100.5, -1.0]), 100.0, material_ground),
@@ -23,7 +23,16 @@ world: HittableList = HittableList(
 )
 
 # Initialize the camera
-camera: Camera = Camera(image_width=600, samples_per_pixel=10)
+camera: Camera = Camera(
+    image_width=400,
+    samples_per_pixel=10,
+    aspect_ratio=16. / 9.,
+    max_depth=50,
+    vfov=90,
+    look_from=t.Tensor([-2., 2., 1.]),
+    look_at=t.Tensor([0., 0., -1.]),
+    vup=t.Tensor([0.,1.,0.])
+    )
 
 # Render the image
 image = camera.render(world)
