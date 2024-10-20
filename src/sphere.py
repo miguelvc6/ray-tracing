@@ -4,13 +4,15 @@ from jaxtyping import Bool, Float, jaxtyped
 from typeguard import typechecked as typechecker
 
 from hittable import HitRecord, Hittable
+from materials import Material
 
 
 @jaxtyped(typechecker=typechecker)
 class Sphere(Hittable):
-    def __init__(self, center: Float[t.Tensor, "3"], radius: float):
+    def __init__(self, center: Float[t.Tensor, "3"], radius: float, material: Material):
         self.center: Float[t.Tensor, "3"] = center
         self.radius: float = max(radius, 0.0)
+        self.material: Material = material
 
     def hit(
         self,
@@ -64,4 +66,8 @@ class Sphere(Hittable):
         record.normal[sphere_hit] = normal_vectors[sphere_hit]
         record.set_face_normal(pixel_directions, record.normal)
 
+        # Set material for hits
+        indices = sphere_hit.nonzero(as_tuple=False).squeeze(-1)
+        for idx in indices:
+            record.material[idx] = self.material
         return record

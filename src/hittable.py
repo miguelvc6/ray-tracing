@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    from materials import Material
 
 import torch as t
 from jaxtyping import Bool, Float, jaxtyped
@@ -17,12 +20,14 @@ class HitRecord:
         normal: Float[t.Tensor, "... 3"],
         t: Float[t.Tensor, "..."],
         front_face: Bool[t.Tensor, "..."] = None,
+        material: List[Optional["Material"]] = None,
     ):
-        self.hit: Bool[t.Tensor, "..."] = hit
-        self.point: Float[t.Tensor, "... 3"] = point
-        self.normal: Float[t.Tensor, "... 3"] = normal
-        self.t: Float[t.Tensor, "..."] = t
-        self.front_face: Bool[t.Tensor, "..."] = front_face
+        self.hit = hit
+        self.point = point
+        self.normal = normal
+        self.t = t
+        self.front_face = front_face
+        self.material = material or [None] * hit.numel()
 
     @jaxtyped(typechecker=typechecker)
     def set_face_normal(
@@ -43,7 +48,8 @@ class HitRecord:
         normal: Float[t.Tensor, "... 3"] = t.zeros((*shape, 3), dtype=t.float32, device=device)
         t_values: Float[t.Tensor, "..."] = t.full(shape, float("inf"), dtype=t.float32, device=device)
         front_face: Bool[t.Tensor, "..."] = t.full(shape, False, dtype=t.bool, device=device)
-        return HitRecord(hit, point, normal, t_values, front_face)
+        material: List[Optional[Material]] = [None] * t_values.numel()
+        return HitRecord(hit, point, normal, t_values, front_face, material)
 
 
 @jaxtyped(typechecker=typechecker)
@@ -80,7 +86,6 @@ class HittableList(Hittable):
 
         for obj in self.objects:
             obj_record: HitRecord = obj.hit(pixel_rays, t_min, t_max)
-
             closer_mask: Bool[t.Tensor, "N"] = obj_record.hit & (obj_record.t < closest_so_far)
             closest_so_far = t.where(closer_mask, obj_record.t, closest_so_far)
 
@@ -88,6 +93,11 @@ class HittableList(Hittable):
             record.point = t.where(closer_mask.unsqueeze(-1), obj_record.point, record.point)
             record.normal = t.where(closer_mask.unsqueeze(-1), obj_record.normal, record.normal)
             record.t = t.where(closer_mask, obj_record.t, record.t)
+            record.front_face = t.where(closer_mask, obj_record.front_face, record.front_face)
 
-        record.set_face_normal(pixel_rays[:, :, 1], record.normal)
+            # Update materials
+            indices = closer_mask.nonzero(as_tuple=False).squeeze(-1)
+            for idx in indices.tolist():
+                record.material[idx] = obj_record.material[idx]
+
         return record

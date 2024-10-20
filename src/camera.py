@@ -56,31 +56,26 @@ class Camera:
     @jaxtyped(typechecker=typechecker)
     def ray_color(
         self,
-        pixel_rays: Float[t.Tensor, "sample h w 3 2"],
+        pixel_rays: Float[t.Tensor, "N 3 2"],
         world: Hittable,
         depth: int = 50,
-    ) -> Float[t.Tensor, "sample h w 3"]:
+    ) -> Float[t.Tensor, "N 3"]:
         if depth <= 0:
             # Return black when maximum depth is reached
-            N = pixel_rays.shape[0] * pixel_rays.shape[1] * pixel_rays.shape[2]
-            return t.zeros((N, 3), dtype=pixel_rays.dtype, device=pixel_rays.device).view(pixel_rays.shape[:-2] + (3,))
+            return t.zeros((pixel_rays.shape[0], 3), device=pixel_rays.device)
 
-        # Flatten pixel_rays
-        original_shape = pixel_rays.shape[:-2]
-        N = pixel_rays.numel() // (3 * 2)
-        pixel_rays_flat: Float[t.Tensor, "N 3 2"] = pixel_rays.view(N, 3, 2)
-
+        N = pixel_rays.shape[0]
         # Perform hit test
-        hit_record: HitRecord = world.hit(pixel_rays_flat, 0.001, float("inf"))
+        hit_record: HitRecord = world.hit(pixel_rays, 0.001, float("inf"))
 
         # Initialize colors
-        colors: Float[t.Tensor, "N 3"] = t.zeros((N, 3), dtype=pixel_rays.dtype, device=pixel_rays.device)
+        colors: Float[t.Tensor, "N 3"] = t.zeros((pixel_rays.shape[0], 3), device=pixel_rays.device)
 
         # Handle rays that did not hit anything
         no_hit_mask: Bool[t.Tensor, "N"] = ~hit_record.hit
         if no_hit_mask.any():
             # Compute background color based on ray direction
-            ray_dirs: Float[t.Tensor, "N 3"] = F.normalize(pixel_rays_flat[:, :, 1], dim=-1)
+            ray_dirs: Float[t.Tensor, "N 3"] = F.normalize(pixel_rays[:, :, 1], dim=-1)
             t_param = 0.5 * (ray_dirs[:, 1] + 1.0)
             background_colors_flat = (1.0 - t_param).unsqueeze(-1) * t.tensor([1.0, 1.0, 1.0])
             background_colors_flat += t_param.unsqueeze(-1) * t.tensor([0.5, 0.7, 1.0])
@@ -88,38 +83,38 @@ class Camera:
 
         # Handle rays that hit an object
         hit_mask: Bool[t.Tensor, "N"] = hit_record.hit
-        M = hit_mask.sum()  # Number of hits
         if hit_mask.any():
-            normals: Float[t.Tensor, "M 3"] = hit_record.normal[hit_mask]
-            points: Float[t.Tensor, "M 3"] = hit_record.point[hit_mask]
+            hit_indices = hit_mask.nonzero(as_tuple=False).squeeze(-1)
+            materials = [hit_record.material[idx] for idx in hit_indices.tolist()]
 
-            # Generate scatter direction with lambertian reflection
-            scatter_direction: Float[t.Tensor, "M 3"] = normals + random_unit_vector(normals.shape)
+            # Group indices by material
+            material_to_indices = {}
+            for idx, material in zip(hit_indices.tolist(), materials):
+                if material not in material_to_indices:
+                    material_to_indices[material] = []
+                material_to_indices[material].append(idx)
 
-            # Handle degenerate scatter direction
-            zero_mask: Bool[t.Tensor, "M"] = scatter_direction.norm(dim=1) < 1e-8
-            scatter_direction[zero_mask] = normals[zero_mask]
+            for material, indices in material_to_indices.items():
+                indices = t.tensor(indices, dtype=t.long, device=pixel_rays.device)
+                ray_in = pixel_rays[indices]
+                sub_hit_record = HitRecord(
+                    hit=hit_record.hit[indices],
+                    point=hit_record.point[indices],
+                    normal=hit_record.normal[indices],
+                    t=hit_record.t[indices],
+                    front_face=hit_record.front_face[indices],
+                    material=[material] * len(indices),
+                )
 
-            # Normalize scatter direction
-            scatter_direction = F.normalize(scatter_direction, dim=-1)
+                scatter_mask, attenuation, scattered_rays = material.scatter(ray_in, sub_hit_record)
 
-            # Create new rays for recursion
-            new_origin: Float[t.Tensor, "M 3"] = points
-            new_direction: Float[t.Tensor, "M 3"] = scatter_direction
-            new_rays: Float[t.Tensor, "M 3 2"] = t.stack([new_origin, new_direction], dim=-1)
+                if scatter_mask.any():
+                    scatter_indices = scatter_mask.nonzero(as_tuple=False).squeeze(-1)
+                    recursive_colors = self.ray_color(scattered_rays[scatter_indices], world, depth - 1)
+                    colors[indices[scatter_indices]] = attenuation[scatter_indices] * recursive_colors
+                else:
+                    colors[indices] = t.zeros((len(indices), 3), device=pixel_rays.device)
 
-            # Recursive call
-            new_colors: Float[t.Tensor, "M 3"] = self.ray_color(
-                new_rays.view(-1, 1, 1, 3, 2),
-                world,
-                depth - 1,
-            ).view(-1, 3)
-
-            # Attenuate color for diffuse reflection
-            colors[hit_mask] = 0.5 * new_colors
-
-        # Reshape colors back to [sample, h, w, 3]
-        colors = colors.view(*original_shape, 3)
         return colors
 
     @jaxtyped(typechecker=typechecker)
@@ -150,7 +145,10 @@ class Camera:
         pixel_rays: Float[t.Tensor, "sample h w 3 2"] = t.stack([origin, directions], dim=-1)
 
         # Call ray_color
-        colors: Float[t.Tensor, "sample h w 3"] = self.ray_color(pixel_rays, world, depth=50)
+        N = pixel_rays.numel() // (3 * 2)
+        pixel_rays_flat: Float[t.Tensor, "N 3 2"] = pixel_rays.view(N, 3, 2)
+        colors_flat: Float[t.Tensor, "N 3"] = self.ray_color(pixel_rays_flat, world, depth=50)
+        colors: Float[t.Tensor, "sample h w 3"] = colors_flat.view(sample, h, w, 3)
 
         # Average over antialiasing samples
         img: Float[t.Tensor, "h w 3"] = colors.mean(dim=0)
