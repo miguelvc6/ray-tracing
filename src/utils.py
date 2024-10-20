@@ -45,3 +45,12 @@ def background_color_gradient(sample: int, h: int, w: int) -> Float[t.Tensor, "s
         background_colors_single.unsqueeze(0).unsqueeze(2).expand(sample, h, w, 3) * 255
     )
     return background_colors
+
+
+@jaxtyped(typechecker=typechecker)
+def random_in_unit_disk(shape: tuple[int, ...]) -> Float[t.Tensor, "... 2"]:
+    r: Float[t.Tensor, "..."] = t.sqrt(t.rand(*shape))
+    theta: Float[t.Tensor, "..."] = t.rand(*shape) * 2 * np.pi
+    x: Float[t.Tensor, "..."] = r * t.cos(theta)
+    y: Float[t.Tensor, "..."] = r * t.sin(theta)
+    return t.stack([x, y], dim=-1)

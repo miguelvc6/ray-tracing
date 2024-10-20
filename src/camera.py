@@ -7,7 +7,7 @@ from PIL import Image
 from typeguard import typechecked as typechecker
 
 from hittable import HitRecord, Hittable
-from utils import degrees_to_radians, tensor_to_image
+from utils import degrees_to_radians, random_in_unit_disk, tensor_to_image
 
 
 @jaxtyped(typechecker=typechecker)
@@ -22,6 +22,8 @@ class Camera:
         samples_per_pixel: int = 10,
         max_depth: int = 50,
         vfov: float = 90.0,  # vertical field of view angle
+        defocus_angle: float = 0,
+        focus_dist: float = 10.0,
     ):
         self.look_from: Float[t.Tensor, "3"] = look_from
         self.look_at: Float[t.Tensor, "3"] = look_at
@@ -30,16 +32,18 @@ class Camera:
         self.samples_per_pixel: int = samples_per_pixel
         self.max_depth: int = max_depth
 
+        self.defocus_angle: float = defocus_angle
+        self.focus_dist: float = focus_dist
+
         self.aspect_ratio: float = aspect_ratio
         self.image_width: int = image_width
         self.image_height: int = max(1, int(image_width / aspect_ratio))
         h, w = self.image_height, self.image_width
 
         # Compute viewport dimensions
-        focal_length: float = (self.look_from - self.look_at).norm()
         theta: float = degrees_to_radians(vfov)
         h_viewport: float = math.tan(theta / 2)
-        self.viewport_height: float = 2.0 * h_viewport * focal_length
+        self.viewport_height: float = 2.0 * h_viewport * focus_dist
         self.viewport_width: float = self.viewport_height * self.aspect_ratio
 
         # Calculate camera basis vectors
@@ -53,12 +57,25 @@ class Camera:
 
         # Calculate the lower-left corner of the viewport
         self.viewport_lower_left: Float[t.Tensor, "3"] = (
-            self.look_from - viewport_u / 2 - viewport_v / 2 - self.w * focal_length
+            self.look_from - viewport_u / 2 - viewport_v / 2 - self.w * focus_dist
         )
+
+        # Calculate the camera defocus disk basis vectors
+        defocus_radius: float = focus_dist * math.tan(degrees_to_radians(defocus_angle / 2))
+        self.defocus_disk_u: Float[t.Tensor, "3"] = self.u * defocus_radius
+        self.defocus_disk_v: Float[t.Tensor, "3"] = self.v * defocus_radius
 
         # Store pixel delta vectors
         self.pixel_delta_u: Float[t.Tensor, "3"] = viewport_u / (w - 1)
         self.pixel_delta_v: Float[t.Tensor, "3"] = viewport_v / (h - 1)
+
+    @jaxtyped(typechecker=typechecker)
+    def defocus_disk_sample(self, sample: int, h: int, w: int) -> Float[t.Tensor, "sample h w 3"]:
+        p: Float[t.Tensor, "sample h w 2"] = random_in_unit_disk((sample, h, w))
+        offset = p[..., 0].unsqueeze(-1) * self.defocus_disk_u.view(1, 1, 1, 3) + p[..., 1].unsqueeze(
+            -1
+        ) * self.defocus_disk_v.view(1, 1, 1, 3)
+        return self.look_from.view(1, 1, 1, 3) + offset
 
     @jaxtyped(typechecker=typechecker)
     def ray_color(
@@ -159,7 +176,12 @@ class Camera:
 
         # Build rays
         origin: Float[t.Tensor, "sample h w 3"] = self.look_from.view(1, 1, 1, 3).expand(sample, h, w, 3)
-        pixel_rays: Float[t.Tensor, "sample h w 3 2"] = t.stack([origin, directions], dim=-1)
+        if self.defocus_angle <= 0:
+            ray_origin = origin
+        else:
+            ray_origin = self.defocus_disk_sample(sample, h, w)
+
+        pixel_rays: Float[t.Tensor, "sample h w 3 2"] = t.stack([ray_origin, directions], dim=-1)
 
         # Flatten rays for processing
         N = sample * h * w
