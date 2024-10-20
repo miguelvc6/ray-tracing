@@ -84,7 +84,7 @@ class Camera:
             t_param = 0.5 * (ray_dirs[:, 1] + 1.0)
             background_colors_flat = (1.0 - t_param).unsqueeze(-1) * t.tensor([1.0, 1.0, 1.0])
             background_colors_flat += t_param.unsqueeze(-1) * t.tensor([0.5, 0.7, 1.0])
-            colors[no_hit_mask] = background_colors_flat[no_hit_mask] * 255
+            colors[no_hit_mask] = background_colors_flat[no_hit_mask]
 
         # Handle rays that hit an object
         hit_mask: Bool[t.Tensor, "N"] = hit_record.hit
@@ -93,7 +93,7 @@ class Camera:
             normals: Float[t.Tensor, "M 3"] = hit_record.normal[hit_mask]
             points: Float[t.Tensor, "M 3"] = hit_record.point[hit_mask]
 
-            # Generate scatter direction for diffuse reflection
+            # Generate scatter direction with lambertian reflection
             scatter_direction: Float[t.Tensor, "M 3"] = normals + random_unit_vector(normals.shape)
 
             # Handle degenerate scatter direction

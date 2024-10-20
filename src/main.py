@@ -18,4 +18,5 @@ camera: Camera = Camera(image_width=400, samples_per_pixel=10)
 
 # Render the image
 image = camera.render(world)
+image.save("image.png")
 image.show()

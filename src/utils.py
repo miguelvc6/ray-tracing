@@ -8,7 +8,8 @@ from typeguard import typechecked as typechecker
 
 @jaxtyped(typechecker=typechecker)
 def tensor_to_image(tensor: Float[t.Tensor, "h w c"] | Int[t.Tensor, "h w c"]) -> Image.Image:
-    tensor = tensor.clamp(0, 255)
+    tensor = tensor.sqrt()  # gamma correction
+    tensor = tensor.multiply(255).clamp(0, 255)
     array = tensor.cpu().numpy().astype(np.uint8)
     array = array[::-1, :, :]
     image = Image.fromarray(array, mode="RGB")
