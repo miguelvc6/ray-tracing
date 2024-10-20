@@ -9,26 +9,29 @@ from sphere import Sphere
 device = t.device("cuda" if t.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
+
 def random_double(min_val=0.0, max_val=1.0):
     return min_val + (max_val - min_val) * random.random()
 
+
 def random_color():
-    return t.Tensor([random.random(), random.random(), random.random()])
+    return t.tensor([random.random(), random.random(), random.random()], device=device)
+
 
 # Initialize the world
 world = HittableList()
 
 # Ground
-ground_material = Lambertian(t.Tensor([0.5, 0.5, 0.5]))
-world.add(Sphere(t.tensor([0, -1000, 0]), 1000, ground_material))
+ground_material = Lambertian(t.tensor([0.5, 0.5, 0.5], device=device))
+world.add(Sphere(t.tensor([0, -1000, 0], device=device), 1000, ground_material))
 
 # Random small spheres
 for a in range(-11, 11):
     for b in range(-11, 11):
         choose_mat = random_double()
-        center = t.tensor([a + 0.9*random_double(), 0.2, b + 0.9*random_double()])
+        center = t.tensor([a + 0.9 * random_double(), 0.2, b + 0.9 * random_double()], device=device)
 
-        if (center - t.tensor([4, 0.2, 0])).norm() > 0.9:
+        if (center - t.tensor([4, 0.2, 0], device=device)).norm() > 0.9:
             if choose_mat < 0.8:
                 # Diffuse
                 albedo = random_color() * random_color()
@@ -41,29 +44,29 @@ for a in range(-11, 11):
             else:
                 # Glass
                 sphere_material = Dielectric(1.5)
-            
+
             world.add(Sphere(center, 0.2, sphere_material))
 
 # Three larger spheres
 material1 = Dielectric(1.5)
-world.add(Sphere(t.tensor([0, 1, 0]), 1.0, material1))
+world.add(Sphere(t.tensor([0, 1, 0], device=device), 1.0, material1))
 
-material2 = Lambertian(t.Tensor([0.4, 0.2, 0.1]))
-world.add(Sphere(t.tensor([-4, 1, 0]), 1.0, material2))
+material2 = Lambertian(t.tensor([0.4, 0.2, 0.1], device=device))
+world.add(Sphere(t.tensor([-4, 1, 0], device=device), 1.0, material2))
 
-material3 = Metal(t.Tensor([0.7, 0.6, 0.5]), 0.0)
-world.add(Sphere(t.tensor([4, 1, 0]), 1.0, material3))
+material3 = Metal(t.tensor([0.7, 0.6, 0.5], device=device), 0.0)
+world.add(Sphere(t.tensor([4, 1, 0], device=device), 1.0, material3))
 
 # Initialize the camera
 camera = Camera(
-    image_width=1200,
-    samples_per_pixel=500,
+    image_width=800,
+    samples_per_pixel=50,
     aspect_ratio=16.0 / 9.0,
     max_depth=50,
     vfov=20,
-    look_from=t.Tensor([13, 2, 3]),
-    look_at=t.Tensor([0, 0, 0]),
-    vup=t.Tensor([0, 1, 0]),
+    look_from=t.tensor([13, 2, 3], dtype=t.float32, device=device),
+    look_at=t.tensor([0, 0, 0], dtype=t.float32, device=device),
+    vup=t.tensor([0, 1, 0], dtype=t.float32, device=device),
     defocus_angle=0.6,
     focus_dist=10.0,
 )

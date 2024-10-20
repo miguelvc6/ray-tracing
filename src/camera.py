@@ -70,9 +70,14 @@ class Camera:
         self.pixel_delta_u: Float[t.Tensor, "3"] = viewport_u / (w - 1)
         self.pixel_delta_v: Float[t.Tensor, "3"] = viewport_v / (h - 1)
 
+        self.viewport_lower_left = self.viewport_lower_left.to(device)
+        self.pixel_delta_u = self.pixel_delta_u.to(device)
+        self.pixel_delta_v = self.pixel_delta_v.to(device)
+
+
     @jaxtyped(typechecker=typechecker)
     def defocus_disk_sample(self, sample: int, h: int, w: int) -> Float[t.Tensor, "sample h w 3"]:
-        p: Float[t.Tensor, "sample h w 2"] = random_in_unit_disk((sample, h, w), device=device)
+        p: Float[t.Tensor, "sample h w 2"] = random_in_unit_disk((sample, h, w))
         offset = p[..., 0].unsqueeze(-1) * self.defocus_disk_u.view(1, 1, 1, 3) + p[..., 1].unsqueeze(
             -1
         ) * self.defocus_disk_v.view(1, 1, 1, 3)
@@ -172,11 +177,11 @@ class Camera:
 
         # Compute direction vectors
         directions: Float[t.Tensor, "sample h w 3"] = F.normalize(
-            sampled_pixels - self.look_from.view(1, 1, 1, 3), dim=-1
+            sampled_pixels - self.look_from.to(device).view(1, 1, 1, 3), dim=-1
         )
 
         # Build rays
-        origin: Float[t.Tensor, "sample h w 3"] = self.look_from.view(1, 1, 1, 3).expand(sample, h, w, 3)
+        origin: Float[t.Tensor, "sample h w 3"] = self.look_from.to(device).view(1, 1, 1, 3).expand(sample, h, w, 3)
         if self.defocus_angle <= 0:
             ray_origin = origin
         else:

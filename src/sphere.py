@@ -23,10 +23,10 @@ class Sphere(Hittable):
         t_max: float,
     ) -> HitRecord:
         N: int = pixel_rays.shape[0]
-        record: HitRecord = HitRecord.empty((N,), device=device)
+        record: HitRecord = HitRecord.empty((N,))
 
-        origin: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 0].to(device)
-        pixel_directions: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 1].to(device)
+        origin: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 0]
+        pixel_directions: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 1]
 
         oc: Float[t.Tensor, "N 3"] = origin - self.center
 
