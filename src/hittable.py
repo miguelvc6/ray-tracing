@@ -71,8 +71,11 @@ class Hittable(ABC):
 class HittableList(Hittable):
     """List of hittable objects."""
 
-    def __init__(self, objects: List[Hittable]):
+    def __init__(self, objects: List[Hittable] = []):
         self.objects: List[Hittable] = objects
+
+    def add(self, object: Hittable) -> None:
+        self.objects.append(object)
 
     def hit(
         self,
