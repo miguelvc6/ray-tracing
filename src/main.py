@@ -7,6 +7,7 @@ from materials import Dielectric, Lambertian, Metal
 from sphere import Sphere
 
 device = t.device("cuda" if t.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
 def random_double(min_val=0.0, max_val=1.0):
     return min_val + (max_val - min_val) * random.random()

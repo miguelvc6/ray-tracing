@@ -41,8 +41,9 @@ class HitRecord:
 
     @staticmethod
     @jaxtyped(typechecker=typechecker)
-    def empty(shape: t.Size, device: t.device = "cpu") -> "HitRecord":
+    def empty(shape: t.Size, device: t.device = None) -> "HitRecord":
         """Creates an empty HitRecord with default values."""
+        device = t.device("cuda" if t.cuda.is_available() else "cpu")
         hit: Bool[t.Tensor, "..."] = t.full(shape, False, dtype=t.bool, device=device)
         point: Float[t.Tensor, "... 3"] = t.zeros((*shape, 3), dtype=t.float32, device=device)
         normal: Float[t.Tensor, "... 3"] = t.zeros((*shape, 3), dtype=t.float32, device=device)
@@ -83,9 +84,10 @@ class HittableList(Hittable):
         t_min: float,
         t_max: float,
     ) -> HitRecord:
+        device = t.device("cuda" if t.cuda.is_available() else "cpu")
         N: int = pixel_rays.shape[0]
-        record: HitRecord = HitRecord.empty((N,), device=pixel_rays.device)
-        closest_so_far: Float[t.Tensor, "N"] = t.full((N,), t_max, device=pixel_rays.device)
+        record: HitRecord = HitRecord.empty((N,), device=device)
+        closest_so_far: Float[t.Tensor, "N"] = t.full((N,), t_max, device=device)
 
         for obj in self.objects:
             obj_record: HitRecord = obj.hit(pixel_rays, t_min, t_max)

@@ -9,14 +9,15 @@ from typeguard import typechecked as typechecker
 from hittable import HitRecord, Hittable
 from utils import degrees_to_radians, random_in_unit_disk, tensor_to_image
 
+device = t.device("cuda" if t.cuda.is_available() else "cpu")
 
 @jaxtyped(typechecker=typechecker)
 class Camera:
     def __init__(
         self,
-        look_from: Float[t.Tensor, "3"] = t.tensor([0.0, 0.0, 0.0]),
-        look_at: Float[t.Tensor, "3"] = t.tensor([0.0, 0.0, -1.0]),
-        vup: Float[t.Tensor, "3"] = t.tensor([0.0, 1.0, 0.0]),
+        look_from: Float[t.Tensor, "3"] = t.tensor([0.0, 0.0, 0.0], device=device),
+        look_at: Float[t.Tensor, "3"] = t.tensor([0.0, 0.0, -1.0], device=device),
+        vup: Float[t.Tensor, "3"] = t.tensor([0.0, 1.0, 0.0], device=device),
         aspect_ratio: float = 16.0 / 9.0,
         image_width: int = 400,
         samples_per_pixel: int = 10,
@@ -71,7 +72,7 @@ class Camera:
 
     @jaxtyped(typechecker=typechecker)
     def defocus_disk_sample(self, sample: int, h: int, w: int) -> Float[t.Tensor, "sample h w 3"]:
-        p: Float[t.Tensor, "sample h w 2"] = random_in_unit_disk((sample, h, w))
+        p: Float[t.Tensor, "sample h w 2"] = random_in_unit_disk((sample, h, w), device=device)
         offset = p[..., 0].unsqueeze(-1) * self.defocus_disk_u.view(1, 1, 1, 3) + p[..., 1].unsqueeze(
             -1
         ) * self.defocus_disk_v.view(1, 1, 1, 3)
@@ -86,14 +87,14 @@ class Camera:
     ) -> Float[t.Tensor, "N 3"]:
         if depth <= 0:
             # Return black when maximum depth is reached
-            return t.zeros((pixel_rays.shape[0], 3), device=pixel_rays.device)
+            return t.zeros((pixel_rays.shape[0], 3), device=device)
 
         N = pixel_rays.shape[0]
         # Perform hit test
         hit_record: HitRecord = world.hit(pixel_rays, 0.001, float("inf"))
 
         # Initialize colors
-        colors: Float[t.Tensor, "N 3"] = t.zeros((pixel_rays.shape[0], 3), device=pixel_rays.device)
+        colors: Float[t.Tensor, "N 3"] = t.zeros((pixel_rays.shape[0], 3), device=device)
 
         # Handle rays that did not hit anything
         no_hit_mask: Bool[t.Tensor, "N"] = ~hit_record.hit
@@ -101,8 +102,8 @@ class Camera:
             # Compute background color based on ray direction
             ray_dirs: Float[t.Tensor, "N 3"] = F.normalize(pixel_rays[:, :, 1], dim=-1)
             t_param = 0.5 * (ray_dirs[:, 1] + 1.0)
-            background_colors_flat = (1.0 - t_param).unsqueeze(-1) * t.tensor([1.0, 1.0, 1.0])
-            background_colors_flat += t_param.unsqueeze(-1) * t.tensor([0.5, 0.7, 1.0])
+            background_colors_flat = (1.0 - t_param).unsqueeze(-1) * t.tensor([1.0, 1.0, 1.0], device=device)
+            background_colors_flat += t_param.unsqueeze(-1) * t.tensor([0.5, 0.7, 1.0], device=device)
             colors[no_hit_mask] = background_colors_flat[no_hit_mask]
 
         # Handle rays that hit an object
@@ -119,7 +120,7 @@ class Camera:
                 material_to_indices[material].append(idx)
 
             for material, indices in material_to_indices.items():
-                indices = t.tensor(indices, dtype=t.long, device=pixel_rays.device)
+                indices = t.tensor(indices, dtype=t.long, device=device)
                 ray_in = pixel_rays[indices]
                 sub_hit_record = HitRecord(
                     hit=hit_record.hit[indices],
@@ -144,7 +145,7 @@ class Camera:
                 # Handle rays that do not scatter
                 if no_scatter_indices.numel() > 0:
                     colors[indices[no_scatter_indices]] = t.zeros(
-                        (no_scatter_indices.numel(), 3), device=pixel_rays.device
+                        (no_scatter_indices.numel(), 3), device=device
                     )
 
         return colors
@@ -155,12 +156,12 @@ class Camera:
         h, w = self.image_height, self.image_width
 
         # Prepare grid indices for pixels
-        j_indices = t.arange(h, device=self.look_from.device).view(1, h, 1, 1)
-        i_indices = t.arange(w, device=self.look_from.device).view(1, 1, w, 1)
+        j_indices = t.arange(h, device=device).view(1, h, 1, 1)
+        i_indices = t.arange(w, device=device).view(1, 1, w, 1)
 
         # Generate random offsets for antialiasing
-        noise_u: Float[t.Tensor, "sample h w 1"] = t.rand((sample, h, w, 1), device=self.look_from.device)
-        noise_v: Float[t.Tensor, "sample h w 1"] = t.rand((sample, h, w, 1), device=self.look_from.device)
+        noise_u: Float[t.Tensor, "sample h w 1"] = t.rand((sample, h, w, 1), device=device)
+        noise_v: Float[t.Tensor, "sample h w 1"] = t.rand((sample, h, w, 1), device=device)
 
         # Compute pixel positions on the viewport
         sampled_pixels: Float[t.Tensor, "sample h w 3"] = (

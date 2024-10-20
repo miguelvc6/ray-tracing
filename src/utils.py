@@ -5,6 +5,8 @@ from jaxtyping import Float, Int, jaxtyped
 from PIL import Image
 from typeguard import typechecked as typechecker
 
+device = t.device("cuda" if t.cuda.is_available() else "cpu")
+
 
 @jaxtyped(typechecker=typechecker)
 def tensor_to_image(tensor: Float[t.Tensor, "h w c"] | Int[t.Tensor, "h w c"]) -> Image.Image:
@@ -23,7 +25,7 @@ def degrees_to_radians(degrees: float) -> float:
 
 @jaxtyped(typechecker=typechecker)
 def random_unit_vector(shape: tuple[int, ...]) -> Float[t.Tensor, "... 3"]:
-    vec = t.randn(*shape)
+    vec = t.randn(*shape, device=device)
     vec = F.normalize(vec, dim=-1)
     return vec
 
@@ -35,11 +37,11 @@ def random_on_hemisphere(normal: Float[t.Tensor, "... 3"]) -> Float[t.Tensor, ".
     return t.where(dot_product > 0, vec, -vec)
 
 
-@jaxtyped(typechecker=typechecker)  # Not used
+@jaxtyped(typechecker=typechecker)
 def background_color_gradient(sample: int, h: int, w: int) -> Float[t.Tensor, "sample h w 3"]:
-    white: Float[t.Tensor, "3"] = t.tensor([1.0, 1.0, 1.0])
-    light_blue: Float[t.Tensor, "3"] = t.tensor([0.5, 0.7, 1.0])
-    a: Float[t.Tensor, "h 1"] = t.linspace(0, 1, h).unsqueeze(1)
+    white: Float[t.Tensor, "3"] = t.tensor([1.0, 1.0, 1.0], device=device)
+    light_blue: Float[t.Tensor, "3"] = t.tensor([0.5, 0.7, 1.0], device=device)
+    a: Float[t.Tensor, "h 1"] = t.linspace(0, 1, h, device=device).unsqueeze(1)
     background_colors_single: Float[t.Tensor, "h 3"] = a * light_blue + (1.0 - a) * white
     background_colors: Float[t.Tensor, "sample h w 3"] = (
         background_colors_single.unsqueeze(0).unsqueeze(2).expand(sample, h, w, 3) * 255
@@ -49,8 +51,8 @@ def background_color_gradient(sample: int, h: int, w: int) -> Float[t.Tensor, "s
 
 @jaxtyped(typechecker=typechecker)
 def random_in_unit_disk(shape: tuple[int, ...]) -> Float[t.Tensor, "... 2"]:
-    r: Float[t.Tensor, "..."] = t.sqrt(t.rand(*shape))
-    theta: Float[t.Tensor, "..."] = t.rand(*shape) * 2 * np.pi
+    r: Float[t.Tensor, "..."] = t.sqrt(t.rand(*shape, device=device))
+    theta: Float[t.Tensor, "..."] = t.rand(*shape, device=device) * 2 * np.pi
     x: Float[t.Tensor, "..."] = r * t.cos(theta)
     y: Float[t.Tensor, "..."] = r * t.sin(theta)
     return t.stack([x, y], dim=-1)

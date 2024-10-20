@@ -10,6 +10,8 @@ from typeguard import typechecked as typechecker
 
 from utils import random_unit_vector
 
+device = t.device("cuda" if t.cuda.is_available() else "cpu")
+
 
 @jaxtyped(typechecker=typechecker)
 def reflect(v: Float[t.Tensor, "N 3"], n: Float[t.Tensor, "N 3"]) -> Float[t.Tensor, "N 3"]:
@@ -22,7 +24,7 @@ def refract(
     uv: Float[t.Tensor, "N 3"], n: Float[t.Tensor, "N 3"], etai_over_etat: Float[t.Tensor, "N 1"]
 ) -> Float[t.Tensor, "N 3"]:
     # Computes the refracted vector
-    cos_theta = t.minimum((-uv * n).sum(dim=1, keepdim=True), t.tensor(1.0, device=uv.device))
+    cos_theta = t.minimum((-uv * n).sum(dim=1, keepdim=True), t.tensor(1.0, device=device))
     r_out_perp = etai_over_etat * (uv + cos_theta * n)
     r_out_parallel = -t.sqrt(t.abs(1.0 - (r_out_perp**2).sum(dim=1, keepdim=True))) * n
     return r_out_perp + r_out_parallel
@@ -58,7 +60,7 @@ class Material(ABC):
 @jaxtyped(typechecker=typechecker)
 class Lambertian(Material):
     def __init__(self, albedo: Float[t.Tensor, "3"]):
-        self.albedo = albedo
+        self.albedo = albedo.to(device)
 
     @jaxtyped(typechecker=typechecker)
     def scatter(
@@ -75,7 +77,7 @@ class Lambertian(Material):
         points = hit_record.point
 
         # Generate scatter direction
-        scatter_direction = normals + random_unit_vector((N, 3))
+        scatter_direction = normals + random_unit_vector((N, 3)).to(device)
 
         # Handle degenerate scatter direction
         zero_mask = scatter_direction.norm(dim=1) < 1e-8
@@ -92,7 +94,7 @@ class Lambertian(Material):
         # Attenuation is the albedo
         attenuation = self.albedo.expand(N, 3)
 
-        scatter_mask = t.ones(N, dtype=t.bool, device=r_in.device)
+        scatter_mask = t.ones(N, dtype=t.bool, device=device)
 
         return scatter_mask, attenuation, new_rays
 
@@ -100,7 +102,7 @@ class Lambertian(Material):
 @jaxtyped(typechecker=typechecker)
 class Metal(Material):
     def __init__(self, albedo: Float[t.Tensor, "3"], fuzz: float = 0.3):
-        self.albedo = albedo
+        self.albedo = albedo.to(device)
         self.fuzz = max(0.0, min(fuzz, 1.0))
 
     @jaxtyped(typechecker=typechecker)
@@ -124,7 +126,7 @@ class Metal(Material):
         # Generate reflected directions
         reflected_direction = reflect(in_directions, normals)
 
-        reflected_direction = reflected_direction + self.fuzz * random_unit_vector((N, 3))
+        reflected_direction = reflected_direction + self.fuzz * random_unit_vector((N, 3)).to(device)
         reflected_direction = F.normalize(reflected_direction, dim=-1)
 
         # Check if reflected ray is above the surface
@@ -164,17 +166,17 @@ class Dielectric(Material):
         unit_direction = F.normalize(r_in[:, :, 1], dim=1)  # Shape: [N, 3]
 
         # Attenuation is always (1, 1, 1) for dielectric materials
-        attenuation = t.ones(N, 3, device=r_in.device)  # Shape: [N, 3]
+        attenuation = t.ones(N, 3, device=device)  # Shape: [N, 3]
 
         # Compute the ratio of indices of refraction
         refraction_ratio = t.where(
             front_face.unsqueeze(1),
-            t.full((N, 1), 1.0 / self.refraction_index, device=r_in.device),
-            t.full((N, 1), self.refraction_index, device=r_in.device),
+            t.full((N, 1), 1.0 / self.refraction_index, device=device),
+            t.full((N, 1), self.refraction_index, device=device),
         )  # Shape: [N, 1]
 
         cos_theta = t.minimum(
-            (-unit_direction * normals).sum(dim=1, keepdim=True), t.tensor(1.0, device=r_in.device)
+            (-unit_direction * normals).sum(dim=1, keepdim=True), t.tensor(1.0, device=device)
         )  # Shape: [N, 1]
         sin_theta = t.sqrt(1.0 - cos_theta**2)  # Shape: [N, 1]
 
@@ -183,7 +185,7 @@ class Dielectric(Material):
 
         # Generate random numbers to decide between reflection and refraction
         reflect_prob = reflectance(cos_theta, refraction_ratio)  # Shape: [N, 1]
-        random_numbers = t.rand(N, 1, device=r_in.device)
+        random_numbers = t.rand(N, 1, device=device)
         should_reflect = cannot_refract | (reflect_prob > random_numbers)
 
         # Compute reflected and refracted directions
@@ -193,6 +195,6 @@ class Dielectric(Material):
         new_rays = t.stack([points, direction], dim=-1)  # Shape: [N, 3, 2]
 
         # Scatter mask is always True for dielectric materials
-        scatter_mask = t.ones(N, dtype=t.bool, device=r_in.device)  # Shape: [N]
+        scatter_mask = t.ones(N, dtype=t.bool, device=device)  # Shape: [N]
 
         return scatter_mask, attenuation, new_rays

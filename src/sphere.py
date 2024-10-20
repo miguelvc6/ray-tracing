@@ -6,11 +6,13 @@ from typeguard import typechecked as typechecker
 from hittable import HitRecord, Hittable
 from materials import Material
 
+device = t.device("cuda" if t.cuda.is_available() else "cpu")
+
 
 @jaxtyped(typechecker=typechecker)
 class Sphere(Hittable):
     def __init__(self, center: Float[t.Tensor, "3"], radius: float, material: Material):
-        self.center: Float[t.Tensor, "3"] = center
+        self.center: Float[t.Tensor, "3"] = center.to(device)
         self.radius: float = max(radius, 0.0)
         self.material: Material = material
 
@@ -21,12 +23,12 @@ class Sphere(Hittable):
         t_max: float,
     ) -> HitRecord:
         N: int = pixel_rays.shape[0]
-        record: HitRecord = HitRecord.empty((N,), device=pixel_rays.device)
+        record: HitRecord = HitRecord.empty((N,), device=device)
 
-        origin: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 0]  # Shape: [N, 3]
-        pixel_directions: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 1]  # Shape: [N, 3]
+        origin: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 0].to(device)
+        pixel_directions: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 1].to(device)
 
-        oc: Float[t.Tensor, "N 3"] = origin - self.center  # Broadcasted to [N, 3]
+        oc: Float[t.Tensor, "N 3"] = origin - self.center
 
         # Solve quadratic equation
         a: Float[t.Tensor, "N"] = (pixel_directions**2).sum(dim=1)
@@ -36,13 +38,13 @@ class Sphere(Hittable):
         discriminant: Float[t.Tensor, "N"] = b**2 - 4 * a * c
         sphere_hit: Bool[t.Tensor, "N"] = discriminant >= 0
 
-        t_hit: Float[t.Tensor, "N"] = t.full_like(discriminant, float("inf"))
-        sqrt_discriminant: Float[t.Tensor, "N"] = t.zeros_like(discriminant)
+        t_hit: Float[t.Tensor, "N"] = t.full((N,), float("inf"), device=device)
+        sqrt_discriminant: Float[t.Tensor, "N"] = t.zeros(N, device=device)
         sqrt_discriminant[sphere_hit] = t.sqrt(discriminant[sphere_hit])
 
         # Compute roots
-        t0: Float[t.Tensor, "N"] = t.zeros_like(discriminant)
-        t1: Float[t.Tensor, "N"] = t.zeros_like(discriminant)
+        t0: Float[t.Tensor, "N"] = t.zeros(N, device=device)
+        t1: Float[t.Tensor, "N"] = t.zeros(N, device=device)
         denom: Float[t.Tensor, "N"] = 2.0 * a
         t0[sphere_hit] = (-b[sphere_hit] - sqrt_discriminant[sphere_hit]) / denom[sphere_hit]
         t1[sphere_hit] = (-b[sphere_hit] + sqrt_discriminant[sphere_hit]) / denom[sphere_hit]
