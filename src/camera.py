@@ -27,6 +27,7 @@ class Camera:
         vfov: float = 90.0,  # vertical field of view angle
         defocus_angle: float = 0,
         focus_dist: float = 10.0,
+        batch_size: int = 50000,
     ):
         self.look_from: Float[t.Tensor, "3"] = look_from
         self.look_at: Float[t.Tensor, "3"] = look_at
@@ -34,6 +35,7 @@ class Camera:
 
         self.samples_per_pixel: int = samples_per_pixel
         self.max_depth: int = max_depth
+        self.batch_size: int = batch_size
 
         self.defocus_angle: float = defocus_angle
         self.focus_dist: float = focus_dist
@@ -56,7 +58,7 @@ class Camera:
 
         # Calculate viewport dimensions and vectors
         viewport_u: Float[t.Tensor, "3"] = self.viewport_width * self.u
-        viewport_v: Float[t.Tensor, "3"] = self.viewport_height * self.v
+        viewport_v: Float[t.Tensor, "3"] = -self.viewport_height * self.v
 
         # Calculate the lower-left corner of the viewport
         self.viewport_lower_left: Float[t.Tensor, "3"] = (
@@ -138,26 +140,26 @@ class Camera:
                             refractive_index=hit_record.refractive_index[indices],
                         )
 
-                    # Process scattering for each material
-                    if material_type == MaterialType.Lambertian:
-                        scatter_mask, mat_attenuation, scattered_rays = Lambertian.scatter_material(
-                            ray_in, sub_hit_record
-                        )
-                    elif material_type == MaterialType.Metal:
-                        scatter_mask, mat_attenuation, scattered_rays = Metal.scatter_material(ray_in, sub_hit_record)
-                    elif material_type == MaterialType.Dielectric:
-                        scatter_mask, mat_attenuation, scattered_rays = Dielectric.scatter_material(
-                            ray_in, sub_hit_record
-                        )
-                    attenuation[indices] *= mat_attenuation
-                    rays[indices] = scattered_rays
-                    terminated = ~scatter_mask
-                    if terminated.any():
-                        term_indices = indices[terminated.nonzero(as_tuple=False).squeeze(-1)]
-                        colors[term_indices] += attenuation[term_indices] * t.zeros(
-                            (term_indices.numel(), 3), device=device
-                        )
-                        active_mask[term_indices] = False
+                        # Process scattering for each material
+                        if material_type == MaterialType.Lambertian:
+                            scatter_mask, mat_attenuation, scattered_rays = Lambertian.scatter_material(
+                                ray_in, sub_hit_record
+                            )
+                        elif material_type == MaterialType.Metal:
+                            scatter_mask, mat_attenuation, scattered_rays = Metal.scatter_material(ray_in, sub_hit_record)
+                        elif material_type == MaterialType.Dielectric:
+                            scatter_mask, mat_attenuation, scattered_rays = Dielectric.scatter_material(
+                                ray_in, sub_hit_record
+                            )
+                        attenuation[indices] *= mat_attenuation
+                        rays[indices] = scattered_rays
+                        terminated = ~scatter_mask
+                        if terminated.any():
+                            term_indices = indices[terminated.nonzero(as_tuple=False).squeeze(-1)]
+                            colors[term_indices] += attenuation[term_indices] * t.zeros(
+                                (term_indices.numel(), 3), device=device
+                            )
+                            active_mask[term_indices] = False
             else:
                 break
         # Any remaining active rays contribute background color
@@ -211,14 +213,11 @@ class Camera:
         # Prepare an empty tensor for colors
         colors_flat = t.zeros((N, 3), device=device)
 
-        # Define batch size
-        batch_size = 50000  # Adjust this value based on your GPU memory
-
         # Process rays in batches
-        for i in tqdm(range(0, N, batch_size), total=(N + batch_size - 1) // batch_size):
-            rays_batch = pixel_rays_flat[i : i + batch_size]
+        for i in tqdm(range(0, N, self.batch_size), total=(N + self.batch_size - 1) // self.batch_size):
+            rays_batch = pixel_rays_flat[i : i + self.batch_size]
             colors_batch = self.ray_color(rays_batch, world)
-            colors_flat[i : i + batch_size] = colors_batch
+            colors_flat[i : i + self.batch_size] = colors_batch
 
         colors: Float[t.Tensor, "sample h w 3"] = colors_flat.view(sample, h, w, 3)
 
