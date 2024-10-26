@@ -4,13 +4,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from hittable import HitRecord
 import torch as t
-from jaxtyping import Bool, Float, jaxtyped
 import torch.nn.functional as F
+from jaxtyping import Bool, Float, jaxtyped
 from typeguard import typechecked as typechecker
 
+from config import device
 from utils import random_unit_vector
-
-device = t.device("cuda" if t.cuda.is_available() else "cpu")
 
 
 @jaxtyped(typechecker=typechecker)

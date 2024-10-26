@@ -1,12 +1,14 @@
-import torch as t
 import random
 
+import torch as t
+
+from config import device
 from camera import Camera
 from hittable import HittableList
 from materials import Dielectric, Lambertian, Metal
 from sphere import Sphere
 
-device = t.device("cuda" if t.cuda.is_available() else "cpu")
+# Choose device
 print(f"Using device: {device}")
 
 
@@ -59,10 +61,10 @@ world.add(Sphere(t.tensor([4, 1, 0], device=device), 1.0, material3))
 
 # Initialize the camera
 camera = Camera(
-    image_width=800,
-    samples_per_pixel=50,
+    image_width=400,
+    samples_per_pixel=10,
     aspect_ratio=16.0 / 9.0,
-    max_depth=50,
+    max_depth=10,
     vfov=20,
     look_from=t.tensor([13, 2, 3], dtype=t.float32, device=device),
     look_at=t.tensor([0, 0, 0], dtype=t.float32, device=device),

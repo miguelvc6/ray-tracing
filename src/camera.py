@@ -4,12 +4,13 @@ import torch as t
 import torch.nn.functional as F
 from jaxtyping import Bool, Float, jaxtyped
 from PIL import Image
+from tqdm import tqdm
 from typeguard import typechecked as typechecker
 
+from config import device
 from hittable import HitRecord, Hittable
 from utils import degrees_to_radians, random_in_unit_disk, tensor_to_image
 
-device = t.device("cuda" if t.cuda.is_available() else "cpu")
 
 @jaxtyped(typechecker=typechecker)
 class Camera:
@@ -74,7 +75,6 @@ class Camera:
         self.pixel_delta_u = self.pixel_delta_u.to(device)
         self.pixel_delta_v = self.pixel_delta_v.to(device)
 
-
     @jaxtyped(typechecker=typechecker)
     def defocus_disk_sample(self, sample: int, h: int, w: int) -> Float[t.Tensor, "sample h w 3"]:
         p: Float[t.Tensor, "sample h w 2"] = random_in_unit_disk((sample, h, w))
@@ -88,70 +88,81 @@ class Camera:
         self,
         pixel_rays: Float[t.Tensor, "N 3 2"],
         world: Hittable,
-        depth: int = 50,
     ) -> Float[t.Tensor, "N 3"]:
-        if depth <= 0:
-            # Return black when maximum depth is reached
-            return t.zeros((pixel_rays.shape[0], 3), device=device)
-
         N = pixel_rays.shape[0]
-        # Perform hit test
-        hit_record: HitRecord = world.hit(pixel_rays, 0.001, float("inf"))
+        colors = t.zeros((N, 3), device=device)
+        attenuation = t.ones((N, 3), device=device)
+        rays = pixel_rays
+        active_mask = t.ones(N, dtype=t.bool, device=device)
 
-        # Initialize colors
-        colors: Float[t.Tensor, "N 3"] = t.zeros((pixel_rays.shape[0], 3), device=device)
+        for depth in tqdm(range(self.max_depth), total=self.max_depth):
+            if not active_mask.any():
+                break
 
-        # Handle rays that did not hit anything
-        no_hit_mask: Bool[t.Tensor, "N"] = ~hit_record.hit
-        if no_hit_mask.any():
-            # Compute background color based on ray direction
-            ray_dirs: Float[t.Tensor, "N 3"] = F.normalize(pixel_rays[:, :, 1], dim=-1)
-            t_param = 0.5 * (ray_dirs[:, 1] + 1.0)
-            background_colors_flat = (1.0 - t_param).unsqueeze(-1) * t.tensor([1.0, 1.0, 1.0], device=device)
-            background_colors_flat += t_param.unsqueeze(-1) * t.tensor([0.5, 0.7, 1.0], device=device)
-            colors[no_hit_mask] = background_colors_flat[no_hit_mask]
+            # Perform hit test
+            hit_record = world.hit(rays, 0.001, float("inf"))
 
-        # Handle rays that hit an object
-        hit_mask: Bool[t.Tensor, "N"] = hit_record.hit
-        if hit_mask.any():
-            hit_indices = hit_mask.nonzero(as_tuple=False).squeeze(-1)
-            materials = [hit_record.material[idx] for idx in hit_indices.tolist()]
+            # Handle rays that did not hit anything
+            no_hit_mask = (~hit_record.hit) & active_mask
+            if no_hit_mask.any():
+                ray_dirs = F.normalize(rays[no_hit_mask, :, 1], dim=-1)
+                t_param = 0.5 * (ray_dirs[:, 1] + 1.0)
+                background_colors = (1.0 - t_param).unsqueeze(-1) * t.tensor([1.0, 1.0, 1.0], device=device)
+                background_colors += t_param.unsqueeze(-1) * t.tensor([0.5, 0.7, 1.0], device=device)
+                colors[no_hit_mask] += attenuation[no_hit_mask] * background_colors
+                active_mask[no_hit_mask] = False
 
-            # Group indices by material
-            material_to_indices = {}
-            for idx, material in zip(hit_indices.tolist(), materials):
-                if material not in material_to_indices:
-                    material_to_indices[material] = []
-                material_to_indices[material].append(idx)
+            # Handle rays that hit an object
+            hit_mask = hit_record.hit & active_mask
+            if hit_mask.any():
+                hit_indices = hit_mask.nonzero(as_tuple=False).squeeze(-1)
+                materials = [hit_record.material[idx] for idx in hit_indices.tolist()]
 
-            for material, indices in material_to_indices.items():
-                indices = t.tensor(indices, dtype=t.long, device=device)
-                ray_in = pixel_rays[indices]
-                sub_hit_record = HitRecord(
-                    hit=hit_record.hit[indices],
-                    point=hit_record.point[indices],
-                    normal=hit_record.normal[indices],
-                    t=hit_record.t[indices],
-                    front_face=hit_record.front_face[indices],
-                    material=[material] * len(indices),
-                )
+                # Group indices by material
+                material_to_indices = {}
+                for idx, material in zip(hit_indices.tolist(), materials):
+                    if material not in material_to_indices:
+                        material_to_indices[material] = []
+                    material_to_indices[material].append(idx)
 
-                scatter_mask, attenuation, scattered_rays = material.scatter(ray_in, sub_hit_record)
-
-                # Separate indices for rays that scatter and rays that do not
-                scatter_indices = scatter_mask.nonzero(as_tuple=False).squeeze(-1)
-                no_scatter_indices = (~scatter_mask).nonzero(as_tuple=False).squeeze(-1)
-
-                # Handle scattered rays
-                if scatter_indices.numel() > 0:
-                    recursive_colors = self.ray_color(scattered_rays[scatter_indices], world, depth - 1)
-                    colors[indices[scatter_indices]] = attenuation[scatter_indices] * recursive_colors
-
-                # Handle rays that do not scatter
-                if no_scatter_indices.numel() > 0:
-                    colors[indices[no_scatter_indices]] = t.zeros(
-                        (no_scatter_indices.numel(), 3), device=device
+                # Process scattering for each material
+                for material, indices in material_to_indices.items():
+                    indices = t.tensor(indices, dtype=t.long, device=device)
+                    ray_in = rays[indices]
+                    sub_hit_record = HitRecord(
+                        hit=hit_record.hit[indices],
+                        point=hit_record.point[indices],
+                        normal=hit_record.normal[indices],
+                        t=hit_record.t[indices],
+                        front_face=hit_record.front_face[indices],
+                        material=[material] * len(indices),
                     )
+
+                    scatter_mask, mat_attenuation, scattered_rays = material.scatter(ray_in, sub_hit_record)
+
+                    # Update attenuation and rays
+                    attenuation[indices] *= mat_attenuation
+                    rays[indices] = scattered_rays
+
+                    # For rays that did not scatter, set them as inactive
+                    terminated = ~scatter_mask
+                    if terminated.any():
+                        term_indices = indices[terminated.nonzero(as_tuple=False).squeeze(-1)]
+                        colors[term_indices] += attenuation[term_indices] * t.zeros(
+                            (term_indices.numel(), 3), device=device
+                        )
+                        active_mask[term_indices] = False
+
+            else:
+                break
+
+        # Any remaining active rays contribute background color
+        if active_mask.any():
+            ray_dirs = F.normalize(rays[active_mask, :, 1], dim=-1)
+            t_param = 0.5 * (ray_dirs[:, 1] + 1.0)
+            background_colors = (1.0 - t_param).unsqueeze(-1) * t.tensor([1.0, 1.0, 1.0], device=device)
+            background_colors += t_param.unsqueeze(-1) * t.tensor([0.5, 0.7, 1.0], device=device)
+            colors[active_mask] += attenuation[active_mask] * background_colors
 
         return colors
 
@@ -193,8 +204,8 @@ class Camera:
         N = sample * h * w
         pixel_rays_flat: Float[t.Tensor, "N 3 2"] = pixel_rays.view(N, 3, 2)
 
-        # Call ray_color
-        colors_flat: Float[t.Tensor, "N 3"] = self.ray_color(pixel_rays_flat, world, depth=self.max_depth)
+        # Call the iterative ray_color function
+        colors_flat: Float[t.Tensor, "N 3"] = self.ray_color(pixel_rays_flat, world)
         colors: Float[t.Tensor, "sample h w 3"] = colors_flat.view(sample, h, w, 3)
 
         # Average over antialiasing samples

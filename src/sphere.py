@@ -3,10 +3,9 @@ import torch.nn.functional as F
 from jaxtyping import Bool, Float, jaxtyped
 from typeguard import typechecked as typechecker
 
+from config import device
 from hittable import HitRecord, Hittable
 from materials import Material
-
-device = t.device("cuda" if t.cuda.is_available() else "cpu")
 
 
 @jaxtyped(typechecker=typechecker)

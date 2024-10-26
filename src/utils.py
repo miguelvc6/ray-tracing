@@ -5,7 +5,7 @@ from jaxtyping import Float, Int, jaxtyped
 from PIL import Image
 from typeguard import typechecked as typechecker
 
-device = t.device("cuda" if t.cuda.is_available() else "cpu")
+from config import device
 
 
 @jaxtyped(typechecker=typechecker)
