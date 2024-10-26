@@ -1,8 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Optional
-
-if TYPE_CHECKING:
-    from materials import Material
+from typing import List
 
 import torch as t
 from jaxtyping import Bool, Float, jaxtyped

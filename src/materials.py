@@ -66,6 +66,7 @@ class Material(ABC):
 
 @jaxtyped(typechecker=typechecker)
 class Lambertian(Material):
+    @jaxtyped(typechecker=typechecker)
     def __init__(self, albedo: Float[t.Tensor, "3"]):
         self.albedo = albedo.to(device)
 
@@ -107,6 +108,7 @@ class Lambertian(Material):
 
 @jaxtyped(typechecker=typechecker)
 class Metal(Material):
+    @jaxtyped(typechecker=typechecker)
     def __init__(self, albedo: Float[t.Tensor, "3"], fuzz: float = 0.3):
         self.albedo = albedo.to(device)
         self.fuzz = max(0.0, min(fuzz, 1.0))

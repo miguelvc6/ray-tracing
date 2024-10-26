@@ -1,6 +1,6 @@
 import torch as t
 import torch.nn.functional as F
-from jaxtyping import Bool, Float, jaxtyped
+from jaxtyping import Bool, Float, Int, jaxtyped
 from typeguard import typechecked as typechecker
 
 from config import device
@@ -75,77 +75,83 @@ class Sphere(Hittable):
 
 
 class SphereList(Hittable):
-    def __init__(self, centers, radii, material_types, albedos, fuzzes, refractive_indices):
-        self.centers = centers
-        self.radii = radii
-        self.material_types = material_types
-        self.albedos = albedos
-        self.fuzzes = fuzzes
-        self.refractive_indices = refractive_indices
+    def __init__(
+        self,
+        centers: Float[t.Tensor, "* 3"],
+        radii: Float[t.Tensor, "*"],
+        material_types: Int[t.Tensor, "*"],
+        albedos: Float[t.Tensor, "* 3"],
+        fuzzes: Float[t.Tensor, "*"],
+        refractive_indices: Float[t.Tensor, "*"]
+    ):
+        self.centers: Float[t.Tensor, "* 3"] = centers
+        self.radii: Float[t.Tensor, "*"] = radii
+        self.material_types: Int[t.Tensor, "*"] = material_types
+        self.albedos: Float[t.Tensor, "* 3"] = albedos
+        self.fuzzes: Float[t.Tensor, "*"] = fuzzes
+        self.refractive_indices: Float[t.Tensor, "*"] = refractive_indices
 
-    def hit(self, pixel_rays, t_min, t_max):
-        N = pixel_rays.shape[0]
-        M = self.centers.shape[0]
-        rays_origin = pixel_rays[:, :, 0]  # [N, 3]
-        rays_direction = pixel_rays[:, :, 1]  # [N, 3]
+    def hit(
+        self,
+        pixel_rays: Float[t.Tensor, "N 3 2"],
+        t_min: float,
+        t_max: float
+    ) -> HitRecord:
+        N: int = pixel_rays.shape[0]
+        M: int = self.centers.shape[0]
+        rays_origin: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 0]
+        rays_direction: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 1]
 
-        # Expand to match the number of spheres
-        rays_origin = rays_origin.unsqueeze(1).expand(-1, M, -1)  # [N, M, 3]
-        rays_direction = rays_direction.unsqueeze(1).expand(-1, M, -1)  # [N, M, 3]
-        centers = self.centers.unsqueeze(0).expand(N, -1, -1)  # [N, M, 3]
-        radii = self.radii.unsqueeze(0).expand(N, -1)  # [N, M]
+        rays_origin: Float[t.Tensor, "N M 3"] = rays_origin.unsqueeze(1).expand(-1, M, -1)
+        rays_direction: Float[t.Tensor, "N M 3"] = rays_direction.unsqueeze(1).expand(-1, M, -1)
+        centers: Float[t.Tensor, "N M 3"] = self.centers.unsqueeze(0).expand(N, -1, -1)
+        radii: Float[t.Tensor, "N M"] = self.radii.unsqueeze(0).expand(N, -1)
 
-        oc = rays_origin - centers  # [N, M, 3]
+        oc: Float[t.Tensor, "N M 3"] = rays_origin - centers
 
-        a = (rays_direction**2).sum(dim=2)  # [N, M]
-        b = 2.0 * (rays_direction * oc).sum(dim=2)  # [N, M]
-        c = (oc**2).sum(dim=2) - radii**2  # [N, M]
+        a: Float[t.Tensor, "N M"] = (rays_direction**2).sum(dim=2)
+        b: Float[t.Tensor, "N M"] = 2.0 * (rays_direction * oc).sum(dim=2)
+        c: Float[t.Tensor, "N M"] = (oc**2).sum(dim=2) - radii**2
 
-        discriminant = b**2 - 4 * a * c  # [N, M]
-        valid_discriminant = discriminant >= 0  # [N, M]
+        discriminant: Float[t.Tensor, "N M"] = b**2 - 4 * a * c
+        valid_discriminant: Bool[t.Tensor, "N M"] = discriminant >= 0
 
-        sqrt_discriminant = t.zeros_like(discriminant)
+        sqrt_discriminant: Float[t.Tensor, "N M"] = t.zeros_like(discriminant)
         sqrt_discriminant[valid_discriminant] = t.sqrt(discriminant[valid_discriminant])
 
-        denom = 2.0 * a  # [N, M]
-        t0 = t.full_like(discriminant, float("inf"))
-        t1 = t.full_like(discriminant, float("inf"))
+        denom: Float[t.Tensor, "N M"] = 2.0 * a
+        t0: Float[t.Tensor, "N M"] = t.full_like(discriminant, float("inf"))
+        t1: Float[t.Tensor, "N M"] = t.full_like(discriminant, float("inf"))
 
-        t0[valid_discriminant] = (-b[valid_discriminant] - sqrt_discriminant[valid_discriminant]) / denom[
-            valid_discriminant
-        ]
-        t1[valid_discriminant] = (-b[valid_discriminant] + sqrt_discriminant[valid_discriminant]) / denom[
-            valid_discriminant
-        ]
+        t0[valid_discriminant] = (-b[valid_discriminant] - sqrt_discriminant[valid_discriminant]) / denom[valid_discriminant]
+        t1[valid_discriminant] = (-b[valid_discriminant] + sqrt_discriminant[valid_discriminant]) / denom[valid_discriminant]
 
-        t0_valid = (t0 > t_min) & (t0 < t_max)
-        t1_valid = (t1 > t_min) & (t1 < t_max)
+        t0_valid: Bool[t.Tensor, "N M"] = (t0 > t_min) & (t0 < t_max)
+        t1_valid: Bool[t.Tensor, "N M"] = (t1 > t_min) & (t1 < t_max)
 
-        t_hit = t.full_like(discriminant, float("inf"))
+        t_hit: Float[t.Tensor, "N M"] = t.full_like(discriminant, float("inf"))
         t_hit[t0_valid] = t0[t0_valid]
         t_hit[t1_valid & (t1 < t_hit)] = t1[t1_valid & (t1 < t_hit)]
 
-        sphere_hit = valid_discriminant & (t_hit < float("inf"))
+        sphere_hit: Bool[t.Tensor, "N M"] = valid_discriminant & (t_hit < float("inf"))
 
-        # Find the closest hit for each ray
-        t_hit_min, sphere_indices = t.min(t_hit, dim=1)  # [N]
-        sphere_hit_any = sphere_hit.any(dim=1)  # [N]
+        t_hit_min: Float[t.Tensor, "N"] = t.min(t_hit, dim=1)[0]
+        sphere_indices: Int[t.Tensor, "N"] = t.min(t_hit, dim=1)[1]
+        sphere_hit_any: Bool[t.Tensor, "N"] = sphere_hit.any(dim=1)
         t_hit_min[~sphere_hit_any] = float("inf")
 
-        # Prepare the hit record
-        record = HitRecord.empty((N,))
+        record: HitRecord = HitRecord.empty((N,))
         record.hit = sphere_hit_any
         record.t[sphere_hit_any] = t_hit_min[sphere_hit_any]
-        rays_direction = rays_direction[:, 0, :]  # [N, 3]
-        rays_origin = rays_origin[:, 0, :]  # [N, 3]
-        hit_points = rays_origin + rays_direction * t_hit_min.unsqueeze(1)  # [N, 3]
-        centers_hit = self.centers[sphere_indices]  # [N, 3]
-        normal_vectors = F.normalize(hit_points - centers_hit, dim=1)  # [N, 3]
+        rays_direction: Float[t.Tensor, "N 3"] = rays_direction[:, 0, :]
+        rays_origin: Float[t.Tensor, "N 3"] = rays_origin[:, 0, :]
+        hit_points: Float[t.Tensor, "N 3"] = rays_origin + rays_direction * t_hit_min.unsqueeze(1)
+        centers_hit: Float[t.Tensor, "N 3"] = self.centers[sphere_indices]
+        normal_vectors: Float[t.Tensor, "N 3"] = F.normalize(hit_points - centers_hit, dim=1)
         record.point[sphere_hit_any] = hit_points[sphere_hit_any]
         record.normal[sphere_hit_any] = normal_vectors[sphere_hit_any]
         record.set_face_normal(rays_direction, record.normal)
 
-        # Set per-ray material data
         record.material_type[sphere_hit_any] = self.material_types[sphere_indices[sphere_hit_any]]
         record.albedo[sphere_hit_any] = self.albedos[sphere_indices[sphere_hit_any]]
         record.fuzz[sphere_hit_any] = self.fuzzes[sphere_indices[sphere_hit_any]]

@@ -2,7 +2,7 @@ import math
 import random
 from abc import ABC, abstractmethod
 from enum import IntEnum
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 import torch as t

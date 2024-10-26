@@ -6,15 +6,19 @@ from config import device
 from camera import Camera
 from materials import MaterialType
 from sphere import SphereList
+from jaxtyping import Bool, Float, jaxtyped
+from typeguard import typechecked as typechecker
 
 # Choose device
 print(f"Using device: {device}")
 
 
+@jaxtyped(typechecker=typechecker)
 def random_double(min_val=0.0, max_val=1.0):
     return min_val + (max_val - min_val) * random.random()
 
 
+@jaxtyped(typechecker=typechecker)
 def random_color():
     return t.tensor([random.random(), random.random(), random.random()], device=device)
 
@@ -112,10 +116,10 @@ world = SphereList(
 
 # Initialize the camera
 camera = Camera(
-    image_width=400,
+    image_width=1080,
     samples_per_pixel=10,
     aspect_ratio=16.0 / 9.0,
-    max_depth=10,
+    max_depth=50,
     vfov=20,
     look_from=t.tensor([13, 2, 3], dtype=t.float32, device=device),
     look_at=t.tensor([0, 0, 0], dtype=t.float32, device=device),

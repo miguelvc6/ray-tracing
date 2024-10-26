@@ -2,7 +2,7 @@ import math
 
 import torch as t
 import torch.nn.functional as F
-from jaxtyping import Bool, Float, jaxtyped
+from jaxtyping import Float, jaxtyped
 from PIL import Image
 from tqdm import tqdm
 from typeguard import typechecked as typechecker
