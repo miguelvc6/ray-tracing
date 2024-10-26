@@ -11,23 +11,19 @@ from typeguard import typechecked as typechecker
 
 @jaxtyped(typechecker=typechecker)
 class HitRecord:
-    """Class to register ray-object intersections."""
-
+    @jaxtyped(typechecker=typechecker)
     def __init__(
-        self,
-        hit: Bool[t.Tensor, "..."],
-        point: Float[t.Tensor, "... 3"],
-        normal: Float[t.Tensor, "... 3"],
-        t: Float[t.Tensor, "..."],
-        front_face: Bool[t.Tensor, "..."] = None,
-        material: List[Optional["Material"]] = None,
+        self, hit, point, normal, t, front_face=None, material_type=None, albedo=None, fuzz=None, refractive_index=None
     ):
         self.hit = hit
         self.point = point
         self.normal = normal
         self.t = t
         self.front_face = front_face
-        self.material = material or [None] * hit.numel()
+        self.material_type = material_type
+        self.albedo = albedo
+        self.fuzz = fuzz
+        self.refractive_index = refractive_index
 
     @jaxtyped(typechecker=typechecker)
     def set_face_normal(
@@ -41,17 +37,18 @@ class HitRecord:
 
     @staticmethod
     @jaxtyped(typechecker=typechecker)
-    def empty(shape: t.Size) -> "HitRecord":
-        """Creates an empty HitRecord with default values."""
-        from config import device
-
-        hit: Bool[t.Tensor, "..."] = t.full(shape, False, dtype=t.bool, device=device)
-        point: Float[t.Tensor, "... 3"] = t.zeros((*shape, 3), dtype=t.float32, device=device)
-        normal: Float[t.Tensor, "... 3"] = t.zeros((*shape, 3), dtype=t.float32, device=device)
-        t_values: Float[t.Tensor, "..."] = t.full(shape, float("inf"), dtype=t.float32, device=device)
-        front_face: Bool[t.Tensor, "..."] = t.full(shape, False, dtype=t.bool, device=device)
-        material: List[Optional[Material]] = [None] * t_values.numel()
-        return HitRecord(hit, point, normal, t_values, front_face, material)
+    def empty(shape):
+        device = t.device("cuda" if t.cuda.is_available() else "cpu")
+        hit = t.full(shape, False, dtype=t.bool, device=device)
+        point = t.zeros((*shape, 3), dtype=t.float32, device=device)
+        normal = t.zeros((*shape, 3), dtype=t.float32, device=device)
+        t_values = t.full(shape, float("inf"), dtype=t.float32, device=device)
+        front_face = t.full(shape, False, dtype=t.bool, device=device)
+        material_type = t.full(shape, -1, dtype=t.long, device=device)
+        albedo = t.zeros((*shape, 3), dtype=t.float32, device=device)
+        fuzz = t.zeros(shape, dtype=t.float32, device=device)
+        refractive_index = t.zeros(shape, dtype=t.float32, device=device)
+        return HitRecord(hit, point, normal, t_values, front_face, material_type, albedo, fuzz, refractive_index)
 
 
 @jaxtyped(typechecker=typechecker)

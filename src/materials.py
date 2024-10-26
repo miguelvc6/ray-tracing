@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from hittable import HitRecord
+from enum import IntEnum
+
 import torch as t
 import torch.nn.functional as F
 from jaxtyping import Bool, Float, jaxtyped
@@ -10,6 +12,12 @@ from typeguard import typechecked as typechecker
 
 from config import device
 from utils import random_unit_vector
+
+
+class MaterialType(IntEnum):
+    Lambertian = 0
+    Metal = 1
+    Dielectric = 2
 
 
 @jaxtyped(typechecker=typechecker)
@@ -42,10 +50,10 @@ class Material(ABC):
     def __init__(self):
         pass
 
+    @staticmethod
     @abstractmethod
     @jaxtyped(typechecker=typechecker)
-    def scatter(
-        self,
+    def scatter_material(
         r_in: Float[t.Tensor, "* 3 2"],
         hit_record: "HitRecord",
     ) -> tuple[
@@ -61,9 +69,9 @@ class Lambertian(Material):
     def __init__(self, albedo: Float[t.Tensor, "3"]):
         self.albedo = albedo.to(device)
 
+    @staticmethod
     @jaxtyped(typechecker=typechecker)
-    def scatter(
-        self,
+    def scatter_material(
         r_in: Float[t.Tensor, "N 3 2"],
         hit_record: "HitRecord",
     ) -> tuple[
@@ -91,8 +99,7 @@ class Lambertian(Material):
         new_rays = t.stack([new_origin, new_direction], dim=-1)
 
         # Attenuation is the albedo
-        attenuation = self.albedo.expand(N, 3)
-
+        attenuation = hit_record.albedo
         scatter_mask = t.ones(N, dtype=t.bool, device=device)
 
         return scatter_mask, attenuation, new_rays
@@ -104,9 +111,9 @@ class Metal(Material):
         self.albedo = albedo.to(device)
         self.fuzz = max(0.0, min(fuzz, 1.0))
 
+    @staticmethod
     @jaxtyped(typechecker=typechecker)
-    def scatter(
-        self,
+    def scatter_material(
         r_in: Float[t.Tensor, "N 3 2"],
         hit_record: "HitRecord",
     ) -> tuple[
@@ -123,9 +130,10 @@ class Metal(Material):
         in_directions = F.normalize(in_directions, dim=-1)
 
         # Generate reflected directions
-        reflected_direction = reflect(in_directions, normals)
+        fuzz = hit_record.fuzz.unsqueeze(1)  # Shape: [N, 1]
 
-        reflected_direction = reflected_direction + self.fuzz * random_unit_vector((N, 3)).to(device)
+        reflected_direction = reflect(in_directions, normals)
+        reflected_direction = reflected_direction + fuzz * random_unit_vector((N, 3)).to(device)
         reflected_direction = F.normalize(reflected_direction, dim=-1)
 
         # Check if reflected ray is above the surface
@@ -138,7 +146,7 @@ class Metal(Material):
         new_rays = t.stack([new_origin, new_direction], dim=-1)  # Shape: [N, 3, 2]
 
         # Attenuation is the albedo
-        attenuation = self.albedo.expand(N, 3)  # Shape: [N, 3]
+        attenuation = hit_record.albedo
 
         return scatter_mask, attenuation, new_rays
 
@@ -148,9 +156,9 @@ class Dielectric(Material):
     def __init__(self, refraction_index: float):
         self.refraction_index = refraction_index
 
+    @staticmethod
     @jaxtyped(typechecker=typechecker)
-    def scatter(
-        self,
+    def scatter_material(
         r_in: Float[t.Tensor, "N 3 2"],
         hit_record: "HitRecord",
     ) -> tuple[
@@ -168,10 +176,11 @@ class Dielectric(Material):
         attenuation = t.ones(N, 3, device=device)  # Shape: [N, 3]
 
         one = t.tensor(1.0, device=device)
+        refractive_indices = hit_record.refractive_index.unsqueeze(1)  # Shape: [N, 1]
         refraction_ratio = t.where(
             front_face.unsqueeze(1),
-            t.full((N, 1), 1.0 / self.refraction_index, device=device),
-            t.full((N, 1), self.refraction_index, device=device),
+            one / refractive_indices,
+            refractive_indices,
         )
 
         cos_theta = t.minimum((-unit_direction * normals).sum(dim=1, keepdim=True), one)

@@ -9,6 +9,7 @@ from typeguard import typechecked as typechecker
 
 from config import device
 from hittable import HitRecord, Hittable
+from materials import Dielectric, Lambertian, MaterialType, Metal
 from utils import degrees_to_radians, random_in_unit_disk, tensor_to_image
 
 
@@ -95,7 +96,7 @@ class Camera:
         rays = pixel_rays
         active_mask = t.ones(N, dtype=t.bool, device=device)
 
-        for depth in tqdm(range(self.max_depth), total=self.max_depth):
+        for _ in range(self.max_depth):
             if not active_mask.any():
                 break
 
@@ -116,35 +117,40 @@ class Camera:
             hit_mask = hit_record.hit & active_mask
             if hit_mask.any():
                 hit_indices = hit_mask.nonzero(as_tuple=False).squeeze(-1)
-                materials = [hit_record.material[idx] for idx in hit_indices.tolist()]
+                material_types_hit = hit_record.material_type[hit_indices]
 
                 # Group indices by material
-                material_to_indices = {}
-                for idx, material in zip(hit_indices.tolist(), materials):
-                    if material not in material_to_indices:
-                        material_to_indices[material] = []
-                    material_to_indices[material].append(idx)
+                for material_type in [MaterialType.Lambertian, MaterialType.Metal, MaterialType.Dielectric]:
+                    material_mask = material_types_hit == material_type
 
-                # Process scattering for each material
-                for material, indices in material_to_indices.items():
-                    indices = t.tensor(indices, dtype=t.long, device=device)
-                    ray_in = rays[indices]
-                    sub_hit_record = HitRecord(
-                        hit=hit_record.hit[indices],
-                        point=hit_record.point[indices],
-                        normal=hit_record.normal[indices],
-                        t=hit_record.t[indices],
-                        front_face=hit_record.front_face[indices],
-                        material=[material] * len(indices),
-                    )
+                    if material_mask.any():
+                        indices = hit_indices[material_mask]
+                        ray_in = rays[indices]
+                        sub_hit_record = HitRecord(
+                            hit=hit_record.hit[indices],
+                            point=hit_record.point[indices],
+                            normal=hit_record.normal[indices],
+                            t=hit_record.t[indices],
+                            front_face=hit_record.front_face[indices],
+                            material_type=hit_record.material_type[indices],
+                            albedo=hit_record.albedo[indices],
+                            fuzz=hit_record.fuzz[indices],
+                            refractive_index=hit_record.refractive_index[indices],
+                        )
 
-                    scatter_mask, mat_attenuation, scattered_rays = material.scatter(ray_in, sub_hit_record)
-
-                    # Update attenuation and rays
+                    # Process scattering for each material
+                    if material_type == MaterialType.Lambertian:
+                        scatter_mask, mat_attenuation, scattered_rays = Lambertian.scatter_material(
+                            ray_in, sub_hit_record
+                        )
+                    elif material_type == MaterialType.Metal:
+                        scatter_mask, mat_attenuation, scattered_rays = Metal.scatter_material(ray_in, sub_hit_record)
+                    elif material_type == MaterialType.Dielectric:
+                        scatter_mask, mat_attenuation, scattered_rays = Dielectric.scatter_material(
+                            ray_in, sub_hit_record
+                        )
                     attenuation[indices] *= mat_attenuation
                     rays[indices] = scattered_rays
-
-                    # For rays that did not scatter, set them as inactive
                     terminated = ~scatter_mask
                     if terminated.any():
                         term_indices = indices[terminated.nonzero(as_tuple=False).squeeze(-1)]
@@ -152,10 +158,8 @@ class Camera:
                             (term_indices.numel(), 3), device=device
                         )
                         active_mask[term_indices] = False
-
             else:
                 break
-
         # Any remaining active rays contribute background color
         if active_mask.any():
             ray_dirs = F.normalize(rays[active_mask, :, 1], dim=-1)
@@ -204,8 +208,18 @@ class Camera:
         N = sample * h * w
         pixel_rays_flat: Float[t.Tensor, "N 3 2"] = pixel_rays.view(N, 3, 2)
 
-        # Call the iterative ray_color function
-        colors_flat: Float[t.Tensor, "N 3"] = self.ray_color(pixel_rays_flat, world)
+        # Prepare an empty tensor for colors
+        colors_flat = t.zeros((N, 3), device=device)
+
+        # Define batch size
+        batch_size = 50000  # Adjust this value based on your GPU memory
+
+        # Process rays in batches
+        for i in tqdm(range(0, N, batch_size), total=(N + batch_size - 1) // batch_size):
+            rays_batch = pixel_rays_flat[i : i + batch_size]
+            colors_batch = self.ray_color(rays_batch, world)
+            colors_flat[i : i + batch_size] = colors_batch
+
         colors: Float[t.Tensor, "sample h w 3"] = colors_flat.view(sample, h, w, 3)
 
         # Average over antialiasing samples
