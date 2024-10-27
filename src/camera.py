@@ -146,7 +146,9 @@ class Camera:
                                 ray_in, sub_hit_record
                             )
                         elif material_type == MaterialType.Metal:
-                            scatter_mask, mat_attenuation, scattered_rays = Metal.scatter_material(ray_in, sub_hit_record)
+                            scatter_mask, mat_attenuation, scattered_rays = Metal.scatter_material(
+                                ray_in, sub_hit_record
+                            )
                         elif material_type == MaterialType.Dielectric:
                             scatter_mask, mat_attenuation, scattered_rays = Dielectric.scatter_material(
                                 ray_in, sub_hit_record
@@ -192,17 +194,12 @@ class Camera:
             + (j_indices + noise_v) * self.pixel_delta_v.view(1, 1, 1, 3)
         )
 
-        # Compute direction vectors
-        directions: Float[t.Tensor, "sample h w 3"] = F.normalize(
-            sampled_pixels - self.look_from.to(device).view(1, 1, 1, 3), dim=-1
-        )
-
         # Build rays
-        origin: Float[t.Tensor, "sample h w 3"] = self.look_from.to(device).view(1, 1, 1, 3).expand(sample, h, w, 3)
         if self.defocus_angle <= 0:
-            ray_origin = origin
+            ray_origin = self.look_from.to(device).view(1, 1, 1, 3).expand(sample, h, w, 3)
         else:
             ray_origin = self.defocus_disk_sample(sample, h, w)
+        directions: Float[t.Tensor, "sample h w 3"] = F.normalize(sampled_pixels - ray_origin, dim=-1)
 
         pixel_rays: Float[t.Tensor, "sample h w 3 2"] = t.stack([ray_origin, directions], dim=-1)
 

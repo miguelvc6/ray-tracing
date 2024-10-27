@@ -1,13 +1,13 @@
 import random
 
 import torch as t
-
-from config import device
-from camera import Camera
-from materials import MaterialType
-from sphere import SphereList
 from jaxtyping import jaxtyped
 from typeguard import typechecked as typechecker
+
+from camera import Camera
+from config import device
+from materials import MaterialType
+from sphere import SphereList
 
 # Choose device
 print(f"Using device: {device}")
@@ -116,19 +116,18 @@ world = SphereList(
 
 # Initialize the camera
 camera = Camera(
-    image_width=400,
-    samples_per_pixel=10,
+    image_width=1920,
+    samples_per_pixel=120,
     aspect_ratio=16.0 / 9.0,
-    max_depth=20,
+    max_depth=50,
     vfov=20,
     look_from=t.tensor([13, 2, 3], dtype=t.float32, device=device),
     look_at=t.tensor([0, 0, 0], dtype=t.float32, device=device),
     vup=t.tensor([0, 1, 0], dtype=t.float32, device=device),
-    defocus_angle=0.1,
+    defocus_angle=0.6,
     focus_dist=10.0,
-    batch_size=50000,
+    batch_size=10_000,
 )
-
 
 # Render the image
 image = camera.render(world)

@@ -82,7 +82,7 @@ class SphereList(Hittable):
         material_types: Int[t.Tensor, "*"],
         albedos: Float[t.Tensor, "* 3"],
         fuzzes: Float[t.Tensor, "*"],
-        refractive_indices: Float[t.Tensor, "*"]
+        refractive_indices: Float[t.Tensor, "*"],
     ):
         self.centers: Float[t.Tensor, "* 3"] = centers
         self.radii: Float[t.Tensor, "*"] = radii
@@ -91,12 +91,7 @@ class SphereList(Hittable):
         self.fuzzes: Float[t.Tensor, "*"] = fuzzes
         self.refractive_indices: Float[t.Tensor, "*"] = refractive_indices
 
-    def hit(
-        self,
-        pixel_rays: Float[t.Tensor, "N 3 2"],
-        t_min: float,
-        t_max: float
-    ) -> HitRecord:
+    def hit(self, pixel_rays: Float[t.Tensor, "N 3 2"], t_min: float, t_max: float) -> HitRecord:
         N: int = pixel_rays.shape[0]
         M: int = self.centers.shape[0]
         rays_origin: Float[t.Tensor, "N 3"] = pixel_rays[:, :, 0]
@@ -123,8 +118,12 @@ class SphereList(Hittable):
         t0: Float[t.Tensor, "N M"] = t.full_like(discriminant, float("inf"))
         t1: Float[t.Tensor, "N M"] = t.full_like(discriminant, float("inf"))
 
-        t0[valid_discriminant] = (-b[valid_discriminant] - sqrt_discriminant[valid_discriminant]) / denom[valid_discriminant]
-        t1[valid_discriminant] = (-b[valid_discriminant] + sqrt_discriminant[valid_discriminant]) / denom[valid_discriminant]
+        t0[valid_discriminant] = (-b[valid_discriminant] - sqrt_discriminant[valid_discriminant]) / denom[
+            valid_discriminant
+        ]
+        t1[valid_discriminant] = (-b[valid_discriminant] + sqrt_discriminant[valid_discriminant]) / denom[
+            valid_discriminant
+        ]
 
         t0_valid: Bool[t.Tensor, "N M"] = (t0 > t_min) & (t0 < t_max)
         t1_valid: Bool[t.Tensor, "N M"] = (t1 > t_min) & (t1 < t_max)
