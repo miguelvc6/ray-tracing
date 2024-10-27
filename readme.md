@@ -1,7 +1,7 @@
 # Torch Tracer
 
-An implementation of a raytracer in Python. It is a version of the raytracing algorithm highly
-optimized through parallelization with pyTorch and GPU acceleration. It allows for realistic
+An implementation of a raytracer in Python. It is a version of the **raytracing algorithm highly
+optimized through parallelization with pyTorch and GPU acceleration**. It allows for realistic
 rendering of 3D scenes with shadows, reflections, and refractions, showcasing a variety of 3D shapes
 and materials. A perfect example of the power of parallel computing.
 
@@ -20,24 +20,28 @@ This is the same image as in the book (modulo random sphere placement) rendered 
   - Batched ray processing for efficient GPU utilization
   - Parallel computation of ray intersections and color calculations
   - Configurable batch size to manage memory usage
+
 - 🎨 Advanced Ray Tracing Capabilities
 
   - Multiple ray bounces with configurable maximum depth
   - Anti-aliasing through multiple samples per pixel
   - Depth of field and defocus blur effects
   - Realistic shadows and reflections
+
 - ✨ Material System
 
   - Lambertian (diffuse) surfaces with matte finish
   - Metal surfaces with configurable reflectivity and fuzz
   - Dielectric (glass) materials with refraction
   - Support for multiple materials in a single scene
+
 - 📷 Camera System
 
   - Configurable field of view and aspect ratio
   - Adjustable camera position and orientation
   - Focus distance and defocus angle controls
   - Support for different image resolutions
+
 - 🛡️ Type Safety
 
   - Static type checking with jaxtyping
@@ -46,13 +50,13 @@ This is the same image as in the book (modulo random sphere placement) rendered 
 
 ## Comparison with the Book
 
-The book implements the raytracer in C++. For every pixel in the view plane, the book computes `samples_per_pixel` rays through the pixel and then traces the ray through the scene to compute the color of the pixel. This is done sequentially for each pixel and sample. 
+The **book** implements the raytracer in C++. For every pixel in the view plane, the book computes `samples_per_pixel` rays through the pixel and then traces the ray through the scene to compute the color of the pixel, for at most `max_depth` bounces. This is done sequentially for each pixel, sample and bounce.
 
-The Torch Tracer implements the same algorithm, but uses parallelization with PyTorch to compute the rays in parallel for every pixel and sample in the view plane. This allows for a significant speedup in rendering time.
+The **Torch Tracer** uses parallelization with PyTorch to compute the rays in parallel for every pixel and sample in the view plane. This allows for a significant speedup in rendering time.
 
-This means that for an image with 1920x1080 pixels and 120 samples per pixel, the book computes 1920x1080x120=248,832,000 rays to render the image. Every ray may bounce multiple times, for a maximum of `max_depth` bounces. This means that the book computes 248,832,000 x 50 = 12,441,600,000 rays to render the image.
+This means that for an image with 1920x1080 pixels and 120 samples per pixel, the book computes 1920x1080x120=248,832,000 rays to render the image. Every ray may bounce multiple times, for a maximum of `max_depth` bounces. This means that the book computes at most 248,832,000 x 50 = **12,441,600,000 rays** to render the image.
 
-The Torch Tracer computes the same number of rays, but does it in parallel for every pixel and sample. This means that, if enough GPU memory is available, the Torch Tracer can render the image in just `max_depth` (50 in this case) passes in parallel.
+The **Torch Tracer** computes the same number of rays, but does it in parallel for every pixel and sample. This means that, if enough GPU memory is available, the Torch Tracer can render the image in just `max_depth`, so **50 passes in this case**, in parallel.
 
 In practice, I have evaluated by generating the same scene as in the book's repository, and the Torch Tracer takes ~170 seconds on my GPU (a laptop NVIDIA GeForce RTX 4050 with 8GB of memory), compared to ~645 seconds for the book's C++ implementation. That's a speedup of ~3.79x. The main limiting factor for the Torch Tracer is the GPU memory, for which I have implemented a sequential batching system, but potentially every ray tracing bounce could be done in parallel.
 
@@ -114,6 +118,7 @@ image.save("render.png")
 
    - Visit [PyTorch&#39;s official website](https://pytorch.org/get-started/locally/) to install the correct PyTorch and CUDA versions for your system
    - GPU acceleration is highly recommended as CPU rendering is significantly slower
+
 2. Install dependencies:
 
 ```bash
