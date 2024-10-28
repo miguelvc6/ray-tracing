@@ -9,7 +9,7 @@ To read my blog post on the project, click [here](https://mvazquez.ai/blog/outpu
 
 Based on the book [&#34;Ray Tracing in One Weekend&#34; by Peter Shirley](https://raytracing.github.io/books/RayTracingInOneWeekend.html) where a basic raytracer is implemented using C++ in a sequential manner, but I have implemented it in Python with PyTorch and parallelized the raytracing.
 
-![Example Rendered Image](image.png)
+![Example Rendered Image](random_spheres.png)
 
 This is the same image as in the book (modulo random sphere placement) rendered using the Torch Tracer. The scene includes various 3D shapes, materials, and lighting effects to demonstrate the capabilities of the raytracer.
 
